@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from rfspectrum.bands import PRESETS
 from rfspectrum.debrief import build_summary, debrief
-from rfspectrum.runtime import Runtime
+from rfspectrum.runtime import DRONE_EMITTERS, Runtime
 
 logger = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
@@ -72,6 +72,7 @@ def create_app(runtime: Runtime) -> FastAPI:
         if body.id not in PRESETS:
             raise HTTPException(404, f"unknown preset {body.id}")
         runtime.set_preset(body.id)
+        runtime.stop_drone_watch()  # the presenter picked a band
         if runtime.sim is not None and runtime.sim.scenario == "auto":
             runtime.sim.scenario = "manual"  # the presenter has taken over
         return {"preset": runtime.preset_id, "available": runtime.preset_available(body.id)}
@@ -114,6 +115,11 @@ def create_app(runtime: Runtime) -> FastAPI:
             runtime.sim.set_emitter(body.id, body.on, time.time())
         except KeyError:
             raise HTTPException(404, f"unknown simulated emitter {body.id}") from None
+        if body.id in DRONE_EMITTERS:
+            if body.on:
+                runtime.start_drone_watch()  # sweep the bands the drone link uses
+            elif not any(runtime.sim.emitters[d].enabled for d in DRONE_EMITTERS):
+                runtime.stop_drone_watch()
         return runtime.sim.state()
 
     @app.post("/api/sim/scenario")

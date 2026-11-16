@@ -260,7 +260,7 @@ function drawAlloc() {
 }
 
 function renderPresets() {
-  if (!changed("presets", [status.presets.map(p => [p.id, p.available]), status.preset, status.scan])) return;
+  if (!changed("presets", [status.presets.map(p => [p.id, p.available]), status.preset, status.scan, status.drone_watch])) return;
   const bar = $("presets"); bar.innerHTML = "";
   for (const p of status.presets) {
     const b = document.createElement("button");
@@ -271,7 +271,8 @@ function renderPresets() {
     bar.appendChild(b);
   }
   const s = document.createElement("button");
-  s.textContent = "Auto-scan " + (status.scan ? "ON" : "off"); s.className = status.scan ? "on" : "";
+  s.textContent = status.drone_watch ? "Drone watch 2.4 ↔ 5.8 GHz" : "Auto-scan " + (status.scan ? "ON" : "off");
+  s.className = status.scan ? "on" : "";
   s.title = `Cycle through every available band (${status.scan_dwell_s}s each) with one receiver`;
   s.onclick = () => post("/api/scan", {on: !status.scan});
   bar.appendChild(s);

@@ -94,8 +94,11 @@ class SimEmitter:
         raise NotImplementedError
 
     def _schedule(self, t1: float) -> None:
-        if self._next_start is None:
-            self._next_start = 0.0
+        if self._next_start is None or self._next_start < t1 - 120.0:
+            # Never replay a long gap burst by burst (e.g. enabled at t=0, first rendered at
+            # wall-clock time): that loop held the render lock for minutes. Skip ahead instead.
+            self._bursts.clear()
+            self._next_start = t1 + self.first_delay()
         while self._next_start < t1:
             burst, gap = self.next_burst(self._next_start)
             self._bursts.append(burst)

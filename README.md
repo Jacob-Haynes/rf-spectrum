@@ -200,6 +200,12 @@ through the existing `hackrf_sweep` backend. One HackRF covers both bands with *
 because each band keeps its last-known state while the other is being swept. Without one, run
 this segment in simulate mode: the **FPV drone power-on** and **FPV drone flight** toggles
 (also part of **Auto demo**) generate ELRS 2.4 hopping and an O4-style 10/20 MHz video block.
+Switching either one on (in the UI or with `POST /api/sim/emitter`) starts **Drone watch**: the
+sweep alternates between 2.4 GHz and 5.8 GHz every `DRONE_WATCH_DWELL_S` seconds (default 8), so
+both halves of the link are seen whatever band was selected. Picking a band yourself, or
+switching the drone off, ends it. From the toggle, expect the "possible" alert (and its CoT)
+within about 2 s and "higher confidence" within about 15 s. Set `RFSPEC_DEMO=drone` in the
+drone-threat profile to turn CoT alerts on by default (an explicit `ALERT_COT` wins).
 
 **Bearings.** This sensor reports *that* a link exists, not *where*. With a directional panel
 or Yagi antenna on the HackRF, you can take a manual bearing: sweep the antenna slowly and note

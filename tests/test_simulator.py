@@ -58,3 +58,18 @@ def test_manual_toggle_leaves_auto():
     env.set_emitter("vtx", True, 0.0)
     assert env.scenario == "manual"
     assert env.scenario_tick(10.0) is None
+
+
+def test_first_render_at_wall_clock_time_is_fast():
+    """Regression: background emitters enabled at t=0 and first rendered at wall-clock time used to
+    replay ~1.8e9 s of bursts one by one while holding the render lock (minutes on a Pi), which also
+    blocked POST /api/sim/emitter."""
+    import time
+
+    env = SimulatedEnvironment(seed=0, background=True, scenario="manual")
+    t = time.time()
+    start = time.perf_counter()
+    for preset in ("868", "433", "2g4", "5g8"):
+        env.render(preset, t)
+    env.set_emitter("drone_flight", True, t)
+    assert time.perf_counter() - start < 2.0

@@ -84,3 +84,42 @@ def test_alerts_fire_only_for_new_watched_emitters(tmp_path, monkeypatch):
     assert len(sent) == 1 and "869.5" in sent[0]
     run_sim("5g8", ["vtx"], 10, engine=rt.engine)  # outside watched band
     assert len(sent) == 1
+
+
+def test_drone_toggle_starts_drone_watch(client):
+    c, rt = client
+    assert rt.preset_id == "868"
+    c.post("/api/sim/emitter", json={"id": "drone_flight", "on": True})
+    st = c.get("/api/status").json()
+    assert st["drone_watch"] and st["scan"] and rt.preset_id == "2g4"
+    # the sweep alternates only between the drone bands
+    rt.settings.drone_watch_dwell_s = 0
+    seen = set()
+    for _ in range(4):
+        rt._maybe_scan()
+        seen.add(rt.preset_id)
+    assert seen == {"2g4", "5g8"}
+    # switching to power-on keeps watching; turning the drone off ends the watch
+    c.post("/api/sim/emitter", json={"id": "drone_power", "on": True})
+    assert rt.drone_watch
+    c.post("/api/sim/emitter", json={"id": "drone_power", "on": False})
+    assert not rt.drone_watch and not rt.scan
+
+
+def test_presenter_preset_choice_ends_drone_watch(client):
+    c, rt = client
+    c.post("/api/sim/emitter", json={"id": "drone_power", "on": True})
+    assert rt.drone_watch
+    c.post("/api/preset", json={"id": "868"})
+    assert not rt.drone_watch and rt.preset_id == "868"
+
+
+def test_drone_demo_profile_defaults_cot_on(monkeypatch):
+    monkeypatch.delenv("ALERT_COT", raising=False)
+    monkeypatch.setenv("RFSPEC_DEMO", "drone")
+    assert Settings.from_env().alert_cot is True
+    monkeypatch.setenv("ALERT_COT", "0")  # an explicit setting wins
+    assert Settings.from_env().alert_cot is False
+    monkeypatch.delenv("RFSPEC_DEMO")
+    monkeypatch.delenv("ALERT_COT")
+    assert Settings.from_env().alert_cot is False

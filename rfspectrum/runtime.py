@@ -31,6 +31,9 @@ from rfspectrum.sources.subprocess_sweep import HackRfSweepSource, RtlPowerSourc
 
 logger = logging.getLogger(__name__)
 
+DRONE_WATCH_PRESETS = ("2g4", "5g8")
+DRONE_EMITTERS = ("drone_power", "drone_flight")
+
 
 def build_sources(settings: Settings, sim: SimulatedEnvironment | None) -> dict[str, Source]:
     if settings.backend == "sim":
@@ -92,6 +95,8 @@ class Runtime:
         self._drone_t = 0.0
         self.preset_id = settings.preset if settings.preset in PRESETS else "868"
         self.scan = False
+        self.scan_list: list[str] | None = None  # None = every available band
+        self.drone_watch = False
         self._scan_since = time.time()
         self._retune = threading.Event()
         self._stop = threading.Event()
@@ -189,12 +194,27 @@ class Runtime:
 
     def set_scan(self, on: bool) -> None:
         self.scan = on
+        self.scan_list, self.drone_watch = None, False
         self._scan_since = time.time()
 
+    def start_drone_watch(self) -> None:
+        """Alternate the sweep between the drone C2 (2.4 GHz) and video (5.8 GHz) bands."""
+        self.scan_list, self.drone_watch, self.scan = list(DRONE_WATCH_PRESETS), True, True
+        if self.preset_id not in DRONE_WATCH_PRESETS:
+            self.set_preset(DRONE_WATCH_PRESETS[0])
+        self._scan_since = time.time()
+        logger.info("drone watch: alternating %s every %.0f s", " / ".join(DRONE_WATCH_PRESETS),
+                    self.settings.drone_watch_dwell_s)
+
+    def stop_drone_watch(self) -> None:
+        if self.drone_watch:
+            self.scan, self.scan_list, self.drone_watch = False, None, False
+
     def _maybe_scan(self) -> None:
-        if not self.scan or time.time() - self._scan_since < self.settings.scan_dwell_s:
+        dwell = self.settings.drone_watch_dwell_s if self.drone_watch else self.settings.scan_dwell_s
+        if not self.scan or time.time() - self._scan_since < dwell:
             return
-        ids = [p for p in PRESETS if self.preset_available(p)]
+        ids = [p for p in (self.scan_list or PRESETS) if self.preset_available(p)]
         if ids:
             i = ids.index(self.preset_id) if self.preset_id in ids else -1
             self.set_preset(ids[(i + 1) % len(ids)])
@@ -349,6 +369,7 @@ class Runtime:
                 dict(p.to_dict(), available=self.preset_available(p.id)) for p in PRESETS.values()
             ],
             "scan": self.scan,
+            "drone_watch": self.drone_watch,
             "scan_dwell_s": self.settings.scan_dwell_s,
             "fps": round(self.fps, 1),
             "note": self.status_note,

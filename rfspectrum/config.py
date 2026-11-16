@@ -58,6 +58,8 @@ class Settings:
     window_s: float = 60.0
     rules_file: str = ""
     scan_dwell_s: float = 10.0
+    drone_watch_dwell_s: float = 8.0  # 2.4 <-> 5.8 GHz dwell while a simulated drone is on
+    demo: str = ""  # RFSPEC_DEMO=drone: the drone-threat demo profile (CoT alerts default on)
     sim_scenario: str = "auto"
     sim_background: bool = True
     sim_seed: int | None = None
@@ -105,11 +107,13 @@ class Settings:
             window_s=float(_env("EMCON_WINDOW_S", "60")),
             rules_file=_env("RULES_FILE"),
             scan_dwell_s=float(_env("SCAN_DWELL_S", "10")),
+            drone_watch_dwell_s=float(_env("DRONE_WATCH_DWELL_S", "8")),
+            demo=_env("RFSPEC_DEMO").lower(),
             sim_scenario=_env("SIM_SCENARIO", "auto"),
             sim_background=_flag("SIM_BACKGROUND", True),
             sim_seed=int(seed) if seed else None,
             alert_mesh=_flag("ALERT_MESH"),
-            alert_cot=_flag("ALERT_COT"),
+            alert_cot=_flag("ALERT_COT", _env("RFSPEC_DEMO").lower() == "drone"),
             alert_drone=_flag("ALERT_DRONE", True),
             watch_bands=parse_bands(_env("WATCH_BANDS", "863-870")),
             alert_min_interval_s=float(_env("ALERT_MIN_INTERVAL_S", "60")),
