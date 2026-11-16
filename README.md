@@ -204,6 +204,18 @@ too. So with mesh alerts on, the tool spends its time reporting your own mesh. T
 EMCON point to make once, and a reason not to leave it on. If you do enable it, baseline your
 own node first, or watch a different band.
 
+### Launcher heartbeat
+
+Every `HEARTBEAT_S` seconds (default 10), rf-spectrum publishes a **retained** JSON message to
+`isrkit/heartbeat/rf-spectrum` on the MQTT broker:
+`{"tool":"rf-spectrum","host":"isr-pi","url":"http://isr-pi.local:8140","mode":"simulate|cpu","status":"ok|degraded|error","ts":…}`.
+`status` is `degraded` when the selected band has no receiver or the SDR errored. On a clean
+shutdown it publishes `"status":"stopped"`. If the broker is down, it logs once and keeps
+running. The MQTT and TAK addresses come from `MQTT_HOST/PORT/USER/PASS` and
+`TAK_HOST/TAK_PORT`, or from the `--mqtt-host`, `--mqtt-port`, `--mqtt-user`, `--mqtt-pass`,
+`--tak-host` and `--tak-port` flags. They default to localhost, and the web UI binds to
+`0.0.0.0`.
+
 ## Optional cloud debrief (Gemini)
 
 The debrief works fully offline with rule-based text. If `GEMINI_API_KEY` is set, the

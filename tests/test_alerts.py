@@ -68,3 +68,31 @@ def test_mesh_broker_down_is_harmless_and_rate_limited():
     assert pub.send("test") is True
     assert pub.send("again") is False  # rate-limited
     time.sleep(0.3)  # background publish fails quietly
+
+
+def test_heartbeat_payload_contract():
+    from rfspectrum.alerts.heartbeat import TOPIC, build_heartbeat, short_hostname
+
+    hb = build_heartbeat("simulate", "ok", 8140, now=1_800_000_000.7)
+    assert TOPIC == "isrkit/heartbeat/rf-spectrum"
+    assert set(hb) == {"tool", "host", "url", "mode", "status", "ts"}
+    assert hb["tool"] == "rf-spectrum" and hb["ts"] == 1_800_000_000
+    assert hb["url"] == f"http://{short_hostname()}.local:8140" and "." not in hb["host"]
+    assert build_heartbeat("cpu", "ok", 8140, public_url="http://isr-pi.local:8140")["url"] == "http://isr-pi.local:8140"
+
+
+def test_heartbeat_broker_down_is_harmless():
+    from rfspectrum.alerts.heartbeat import Heartbeat
+
+    hb = Heartbeat(lambda: ("simulate", "ok"), 8140, mqtt_port=1, interval_s=0.1)
+    hb.start()
+    time.sleep(0.3)
+    hb.stop()  # publishes "stopped", fails quietly
+
+
+def test_cli_overrides_mqtt_and_tak():
+    from rfspectrum.config import settings_from_args
+
+    s = settings_from_args(["--simulate", "--mqtt-host", "192.168.4.1", "--mqtt-user", "isrkit",
+                            "--tak-host", "192.168.4.1", "--tak-port", "8088"])
+    assert (s.mqtt_host, s.mqtt_user, s.tak_host, s.tak_port, s.host) == ("192.168.4.1", "isrkit", "192.168.4.1", 8088, "0.0.0.0")

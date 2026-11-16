@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from rfspectrum.alerts.cot import CotClient, build_emitter_cot
+from rfspectrum.alerts.heartbeat import Heartbeat
 from rfspectrum.alerts.mesh import MeshPublisher, emitter_alert_text
 from rfspectrum.bands import PRESETS, get_preset
 from rfspectrum.config import Settings
@@ -115,6 +116,11 @@ class Runtime:
             else None
         )
         self.cot = CotClient(settings.tak_host, settings.tak_port) if settings.alert_cot else None
+        self.heartbeat = Heartbeat(
+            self.health, settings.port, settings.mqtt_host, settings.mqtt_port,
+            settings.mqtt_user, settings.mqtt_pass, interval_s=settings.heartbeat_s,
+            public_url=settings.public_url,
+        )
 
     # ------------------------------------------------------------ lifecycle
 
@@ -125,12 +131,23 @@ class Runtime:
         if self._start_thread and self._thread is None:
             self._thread = threading.Thread(target=self._run, name="sdr", daemon=True)
             self._thread.start()
+            self.heartbeat.start()
+
+    def health(self) -> tuple[str, str]:
+        """(mode, status) for the launcher heartbeat: mode simulate|cpu, status ok|degraded|error."""
+        mode = "simulate" if self.settings.backend == "sim" else "cpu"
+        if self._thread is not None and not self._thread.is_alive() and not self._stop.is_set():
+            return mode, "error"
+        if self.status_note:
+            return mode, "degraded"
+        return mode, "ok"
 
     def stop(self) -> None:
         self._stop.set()
         self._retune.set()
         if self._thread:
             self._thread.join(timeout=5)
+        self.heartbeat.stop()
         for src in self.sources.values():
             src.close()
         if self.cot:

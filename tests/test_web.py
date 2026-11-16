@@ -10,7 +10,8 @@ from rfspectrum.web.app import create_app
 
 @pytest.fixture
 def client(tmp_path):
-    s = Settings(backend="sim", data_dir=str(tmp_path), sim_seed=1, sim_scenario="manual", sim_background=False)
+    s = Settings(backend="sim", data_dir=str(tmp_path), sim_seed=1, sim_scenario="manual", sim_background=False,
+                 mqtt_port=1)
     rt = Runtime(s)
     with TestClient(create_app(rt)) as c:
         yield c, rt
@@ -25,6 +26,7 @@ def test_index_and_status(client):
     assert st["gemini"]["enabled"] is False
     assert st["alerts"]["mesh"] is False and st["alerts"]["cot"] is False
     assert all(p["available"] for p in st["presets"])
+    assert c.app.state.runtime.health() == ("simulate", "ok")
 
 
 def test_websocket_streams_frames(client):

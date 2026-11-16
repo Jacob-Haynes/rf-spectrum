@@ -66,6 +66,8 @@ class Settings:
     sensor_lon: float = 0.0
     gemini_api_key: str = ""
     gemini_model: str = DEFAULT_GEMINI_MODEL
+    heartbeat_s: float = 10.0
+    public_url: str = ""  # override the URL advertised in the heartbeat
 
     @property
     def gemini_enabled(self) -> bool:
@@ -109,6 +111,8 @@ class Settings:
             sensor_lon=float(_env("SENSOR_LON", "0") or 0),
             gemini_api_key=_env("GEMINI_API_KEY"),
             gemini_model=_env("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL,
+            heartbeat_s=float(_env("HEARTBEAT_S", "10")),
+            public_url=_env("RFSPEC_PUBLIC_URL"),
         )
 
 
@@ -123,6 +127,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--scenario", choices=["auto", "manual"], help="simulator scenario")
     p.add_argument("--no-background", action="store_true", help="simulator: no civilian background emitters")
     p.add_argument("--seed", type=int, help="simulator RNG seed")
+    p.add_argument("--tak-host")
+    p.add_argument("--tak-port", type=int)
+    p.add_argument("--mqtt-host")
+    p.add_argument("--mqtt-port", type=int)
+    p.add_argument("--mqtt-user")
+    p.add_argument("--mqtt-pass")
+    p.add_argument("--heartbeat-s", type=float, help="MQTT heartbeat interval (0 = off)")
     return p
 
 
@@ -133,7 +144,8 @@ def settings_from_args(argv: list[str] | None = None) -> Settings:
         s.backend = "sim"
     if args.backend:
         s.backend = args.backend
-    for name in ("preset", "host", "port", "data_dir"):
+    for name in ("preset", "host", "port", "data_dir", "tak_host", "tak_port",
+                 "mqtt_host", "mqtt_port", "mqtt_user", "mqtt_pass", "heartbeat_s"):
         val = getattr(args, name)
         if val is not None:
             setattr(s, name, val)
