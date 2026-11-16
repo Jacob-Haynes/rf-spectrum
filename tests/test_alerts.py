@@ -5,7 +5,7 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 
-from rfspectrum.alerts.cot import CotClient, build_emitter_cot
+from rfspectrum.alerts.cot import build_emitter_cot
 from rfspectrum.alerts.heartbeat import TOPIC, Heartbeat, build_heartbeat, short_hostname
 from rfspectrum.alerts.mesh import MeshPublisher, build_mesh_payload, emitter_alert_text
 from rfspectrum.alerts.mqttbus import MqttBus
@@ -23,39 +23,6 @@ def test_cot_xml_is_valid():
     assert root.get("uid") == "RFSPEC-meshtastic_eu"
     assert root.find("point").get("lat") == "52.000000"
     assert "869.525" in root.find("detail/remarks").text
-
-
-def test_cot_client_survives_tak_down():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]  # closed again: nothing listening
-    c = CotClient("127.0.0.1", port)
-    c.send(build_emitter_cot(EMITTER, 0, 0))
-    time.sleep(0.5)
-    assert c.connected is False
-    c.close()
-
-
-def test_cot_client_delivers():
-    srv = socket.socket()
-    srv.bind(("127.0.0.1", 0))
-    srv.listen(1)
-    got = []
-
-    def accept():
-        conn, _ = srv.accept()
-        conn.settimeout(3)
-        got.append(conn.recv(65536))
-        conn.close()
-
-    th = threading.Thread(target=accept, daemon=True)
-    th.start()
-    c = CotClient("127.0.0.1", srv.getsockname()[1])
-    c.send(build_emitter_cot(EMITTER, 0, 0))
-    th.join(5)
-    c.close()
-    srv.close()
-    assert got and b"<event" in got[0]
 
 
 def test_mesh_payload_contract():
@@ -208,20 +175,6 @@ def test_heartbeat_broker_down_is_harmless():
     time.sleep(0.3)
     hb.stop()  # "stopped" is dropped quietly: not connected
     bus.stop()
-
-
-def test_cot_throttled_per_uid_keeps_newest():
-    cot = CotClient(port=1, min_uid_interval_s=0.4)
-    sent = []
-    cot._enqueue = sent.append  # type: ignore[method-assign]
-    cot.send("a1", uid="A")
-    cot.send("a2", uid="A")  # within 0.4 s: held
-    cot.send("a3", uid="A")  # replaces a2
-    cot.send("b1", uid="B")  # other uid: not throttled
-    assert sent == ["a1", "b1"]
-    time.sleep(1.2)  # the sender thread flushes the newest held message
-    cot.close()
-    assert sent == ["a1", "b1", "a3"]
 
 
 def test_sensor_position_unset_or_zero_is_none(monkeypatch):

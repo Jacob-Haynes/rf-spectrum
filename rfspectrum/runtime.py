@@ -11,9 +11,11 @@ from pathlib import Path
 
 import numpy as np
 
-from rfspectrum.alerts.cot import DRONE_UID, CotClient, build_drone_cot, build_emitter_cot, emitter_uid
-from rfspectrum.alerts.heartbeat import Heartbeat
+from rfspectrum import __version__
+from rfspectrum.alerts.cot import DRONE_UID, build_drone_cot, build_emitter_cot, emitter_uid
+from rfspectrum.alerts.heartbeat import Heartbeat, short_hostname
 from rfspectrum.alerts.mqttbus import MqttBus
+from rfspectrum.alerts.tak_client import TakClient
 from rfspectrum.alerts.mesh import MeshPublisher, drone_alert_text, emitter_alert_text
 from rfspectrum.bands import PRESETS, get_preset
 from rfspectrum.config import Settings
@@ -123,7 +125,12 @@ class Runtime:
             else None
         )
         self.has_position = settings.sensor_lat is not None and settings.sensor_lon is not None
-        self.cot = CotClient(settings.tak_host, settings.tak_port) if settings.alert_cot else None
+        # Contract v5: one registered, long-lived connection to OpenTAKServer
+        self.cot = (
+            TakClient(settings.tak_host, settings.tak_port, short_hostname(),
+                      settings.sensor_lat, settings.sensor_lon, version=__version__)
+            if settings.alert_cot else None
+        )
         if self.cot and not self.has_position:
             logger.warning("ALERT_COT=1 but SENSOR_LAT/SENSOR_LON are not set: no CoT markers will be "
                            "sent (energy detection has no position of its own, and 0,0 is never used)")
@@ -352,7 +359,7 @@ class Runtime:
                 "cot": self.settings.alert_cot,
                 "watch_bands_mhz": [[lo / 1e6, hi / 1e6] for lo, hi in self.settings.watch_bands],
                 "tak": f"{self.settings.tak_host}:{self.settings.tak_port}",
-                "cot_connected": bool(self.cot and self.cot.connected),
+                "cot_connected": bool(self.cot and self.cot.registered),
                 "sensor_position": self.has_position,
             },
             "rules": [r.to_dict() for r in self.rules],

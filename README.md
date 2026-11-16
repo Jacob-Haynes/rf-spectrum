@@ -240,7 +240,7 @@ Set these in `/etc/rf-spectrum.env`:
 | Setting | Effect |
 |---|---|
 | `ALERT_MESH=1` | Publishes `{"text","to","channel","source":"rf-spectrum"}` to `meshbus/tx` on the local MQTT broker (`MQTT_*`). The blufor-tracker bridge sends it over LoRa. We never open the radio's serial port. At most one text per `ALERT_MIN_INTERVAL_S` (default 60, never below 30). |
-| `ALERT_COT=1` | Sends a CoT `a-u-G` marker per new emitter to `TAK_HOST:TAK_PORT` (default 127.0.0.1:8087), reconnecting with backoff. The marker sits at `SENSOR_LAT/SENSOR_LON`, the sensor's own position, because energy detection gives no bearing. At most one message per 5 s per marker (the newest is kept). **If `SENSOR_LAT`/`SENSOR_LON` are unset (or 0,0), no CoT is sent** and the log says so once; use the same OP position as the other tools. |
+| `ALERT_COT=1` | Sends a CoT `a-u-G` marker per new emitter to `TAK_HOST:TAK_PORT` (default 127.0.0.1:8087) over one long-lived connection (see *TAK registration* below). The marker sits at `SENSOR_LAT/SENSOR_LON`, the sensor's own position, because energy detection gives no bearing. At most one message per 5 s per marker (the newest is kept). **If `SENSOR_LAT`/`SENSOR_LON` are unset (or 0,0), no CoT is sent** and the log says so once; use the same OP position as the other tools. |
 | `WATCH_BANDS=863-870` | Only NEW emitters in these MHz ranges alert. Baselined emitters never alert. |
 
 **Why off by default:** a mesh alert is itself an 868 MHz LoRa transmission. If you're
@@ -249,6 +249,20 @@ blufor-tracker node's own traffic (position beacons, telemetry) triggers the Mes
 too. So with mesh alerts on, the tool spends its time reporting your own mesh. That's a nice
 EMCON point to make once, and a reason not to leave it on. If you do enable it, baseline your
 own node first, or watch a different band.
+
+### TAK registration (OpenTAKServer)
+
+OpenTAKServer drops CoT from any sender that isn't a registered device, so rf-spectrum keeps
+**one** TCP connection to `TAK_HOST:TAK_PORT` (reconnecting with backoff, 1 s to 60 s) and
+registers on it before sending anything:
+
+- 3 s after each (re)connect it sends a registration SA, uid `isrkit-rf-spectrum-<ISR_HOST>`,
+  callsign `RF <ISR_HOST>`, type `a-f-G-E-S`, group Cyan. The uid and callsign are stable, so a
+  reconnect is accepted (OTS refuses a callsign that another uid already holds).
+- The SA is re-sent every 60 s with a 120 s stale, at `SENSOR_LAT/SENSOR_LON`. With no position
+  set, the SA carries a 0,0 point with a 9999999 error and stale = start, so it is never drawn.
+- Markers (new emitters, drone link) go on the same connection after registration, with their
+  own uids. Messages queued while TAK is down are sent after the next registration.
 
 ### Launcher heartbeat
 
@@ -316,7 +330,7 @@ rfspectrum/
   engine.py      noise floor, hits, events, emitters, EMCON score
   simulator.py   synthetic RF environment for --simulate
   sources/       rtlsdr (pyrtlsdr), rtl_power, hackrf_sweep, simulated, auto-detect
-  alerts/        cot.py (TAK), mesh.py (meshbus/tx over MQTT)
+  alerts/        tak_client.py (registered TAK connection), cot.py (markers), mesh.py (meshbus/tx), mqttbus.py, heartbeat.py
   debrief.py     offline + optional Gemini debrief
   runtime.py     source thread -> engine -> alerts / WebSocket
   web/           FastAPI app + static index.html

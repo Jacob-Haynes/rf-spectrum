@@ -1,4 +1,4 @@
-"""Plain CoT XML over TCP to a TAK server, with reconnect + backoff.
+"""CoT marker builders. Sending is done by alerts.tak_client.TakClient (one registered connection).
 
 Energy detection gives no bearing or range, so the marker is placed at the
 sensor's own position (SENSOR_LAT/SENSOR_LON) with a large CE and the
@@ -7,22 +7,12 @@ frequency details in the remarks.
 
 from __future__ import annotations
 
-import logging
-import queue
-import socket
-import threading
 import time
-from datetime import datetime, timezone
 from xml.sax.saxutils import escape, quoteattr
 
-logger = logging.getLogger(__name__)
+from rfspectrum.alerts.tak_client import iso_z as _iso
 
 STALE_S = 300
-MIN_UID_INTERVAL_S = 5.0  # contract C4.4: at most one CoT per 5 s per uid
-
-
-def _iso(ts: float) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")[:-4] + "Z"
 
 
 def build_drone_cot(
@@ -80,99 +70,3 @@ def build_emitter_cot(
         f"<remarks>{escape(remarks)}</remarks>"
         "</detail></event>"
     )
-
-
-class CotClient:
-    """Non-blocking sender: queue + background thread, never raises to callers."""
-
-    def __init__(
-        self, host: str = "127.0.0.1", port: int = 8087, max_backoff_s: float = 60.0,
-        min_uid_interval_s: float = MIN_UID_INTERVAL_S,
-    ):
-        self.host, self.port = host, port
-        self.min_uid_interval_s = min_uid_interval_s
-        self._last_uid: dict[str, float] = {}
-        self._pending: dict[str, str] = {}  # uid -> newest throttled message
-        self._plock = threading.Lock()
-        self.max_backoff_s = max_backoff_s
-        self._q: queue.Queue[str] = queue.Queue(maxsize=200)
-        self._sock: socket.socket | None = None
-        self._backoff = 1.0
-        self._next_try = 0.0
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, name="cot", daemon=True)
-        self._thread.start()
-        self.connected = False
-
-    def send(self, xml: str, uid: str | None = None) -> None:
-        """Queue a CoT event. Within 5 s of the last one for this uid, keep only the
-        newest and send it when the window opens (so an escalation is never lost)."""
-        if uid:
-            with self._plock:
-                if time.time() - self._last_uid.get(uid, 0.0) < self.min_uid_interval_s:
-                    self._pending[uid] = xml
-                    return
-                self._last_uid[uid] = time.time()
-        self._enqueue(xml)
-
-    def _flush_pending(self) -> None:
-        now = time.time()
-        with self._plock:
-            due = [u for u in self._pending if now - self._last_uid.get(u, 0.0) >= self.min_uid_interval_s]
-            msgs = []
-            for u in due:
-                msgs.append(self._pending.pop(u))
-                self._last_uid[u] = now
-        for m in msgs:
-            self._enqueue(m)
-
-    def _enqueue(self, xml: str) -> None:
-        try:
-            self._q.put_nowait(xml)
-        except queue.Full:
-            logger.warning("CoT queue full, dropping message")
-
-    def close(self) -> None:
-        self._stop.set()
-        self._drop()
-
-    def _connect(self) -> bool:
-        if time.time() < self._next_try:
-            return False
-        try:
-            s = socket.create_connection((self.host, self.port), timeout=3)
-            s.settimeout(5)
-            self._sock, self.connected, self._backoff = s, True, 1.0
-            logger.info("CoT connected to %s:%d", self.host, self.port)
-            return True
-        except OSError as e:
-            self._next_try = time.time() + self._backoff
-            logger.info("TAK server %s:%d unavailable (%s); retry in %.0fs", self.host, self.port, e, self._backoff)
-            self._backoff = min(self._backoff * 2, self.max_backoff_s)
-            return False
-
-    def _drop(self) -> None:
-        if self._sock is not None:
-            try:
-                self._sock.close()
-            except OSError:
-                pass
-        self._sock, self.connected = None, False
-
-    def _run(self) -> None:
-        while not self._stop.is_set():
-            self._flush_pending()
-            try:
-                xml = self._q.get(timeout=0.5)
-            except queue.Empty:
-                continue
-            for _attempt in range(2):
-                if self._sock is None and not self._connect():
-                    break  # TAK down: drop this message, keep running
-                try:
-                    assert self._sock is not None
-                    self._sock.sendall(xml.encode("utf-8"))
-                    break
-                except OSError as e:
-                    logger.warning("CoT send failed: %s", e)
-                    self._drop()
