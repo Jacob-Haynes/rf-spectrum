@@ -72,6 +72,15 @@
   .stack > .panel + .panel { margin-top: 10px; }
   footer { color: var(--muted); padding: 8px 14px 16px; font-size: 11px; }
   .lesson { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  #drone { display: none; margin: 10px 14px 0; padding: 10px 14px; border-radius: 4px;
+    border: 2px solid var(--red); background: rgba(255,95,86,.12); }
+  #drone.possible { border-color: var(--amber); background: rgba(242,184,75,.12); }
+  #drone h3 { margin: 0 0 4px; font-size: 15px; letter-spacing: .06em; }
+  #drone.high h3 { color: var(--red); } #drone.possible h3 { color: var(--amber); }
+  .simtag { color: #111; background: var(--amber); padding: 0 5px; border-radius: 2px; font-size: 10px;
+    font-weight: 700; margin-left: 6px; letter-spacing: .06em; }
+  .ev-drone td:first-child { border-left: 3px solid var(--amber); }
+  .ev-drone_end td:first-child { border-left: 3px solid var(--line); }
 </style>
 </head>
 <body>
@@ -87,6 +96,7 @@
 </header>
 
 <div class="bar" id="presets"></div>
+<div id="drone"><h3 id="droneTitle"></h3><div id="droneBody" class="kv"></div></div>
 
 <main>
   <div class="stack">
@@ -320,14 +330,34 @@ function renderStatus() {
   }
 }
 
+const SIM = (e) => e.simulated ? '<span class="simtag">SIMULATED</span>' : "";
+
 function renderEvents() {
-  $("events").innerHTML = events.slice(0, 200).map(e => `
-    <tr class="ev-${e.type}">
+  $("events").innerHTML = events.slice(0, 200).map(e => {
+    if (e.type === "drone" || e.type === "drone_end") {
+      const comps = (e.components || []).map(c => esc(c.short)).join(" + ");
+      return `<tr class="ev-${e.type}"><td>${fmtTime(e.ts)}</td>
+        <td>${e.type === "drone" ? "✈" : "○"}${e.confidence === "high" ? ' <span class="new">HIGH</span>' : ""}</td>
+        <td colspan="5">${esc(e.name)}${SIM(e)}<br><span class="kv">${comps}</span></td></tr>`;
+    }
+    return `<tr class="ev-${e.type}">
       <td>${fmtTime(e.ts)}</td>
       <td>${e.type === "start" ? "▲" : "▼"}${e.new_emitter ? ' <span class="new">NEW</span>' : ""}</td>
-      <td>${esc(e.name)}</td><td>${e.freq_mhz.toFixed(3)}</td><td>${Math.round(e.bw_khz)}</td>
+      <td>${esc(e.name)}${SIM(e)}</td><td>${e.freq_mhz.toFixed(3)}</td><td>${Math.round(e.bw_khz)}</td>
       <td>${e.snr_db}</td><td>${e.duration_s == null ? "" : e.duration_s + "s"}</td>
-    </tr>`).join("") || `<tr><td colspan="7" class="kv">No events. A quiet band is the goal.</td></tr>`;
+    </tr>`;
+  }).join("") || `<tr><td colspan="7" class="kv">No events. A quiet band is the goal.</td></tr>`;
+}
+
+function renderDrone(d) {
+  const box = $("drone");
+  if (!d || d.level === "none") { box.style.display = "none"; return; }
+  box.style.display = "block"; box.className = d.level;
+  $("droneTitle").innerHTML = "✈ " + esc(d.level === "high" ? "DRONE C2 + VIDEO LINK: HIGHER CONFIDENCE" : "POSSIBLE DRONE C2/VIDEO LINK")
+    + (d.simulated ? '<span class="simtag">SIMULATED</span>' : "");
+  $("droneBody").innerHTML = d.components.map(c =>
+    `${esc(c.label)} · ${c.freq_mhz.toFixed(1)} MHz · ~${(c.bw_khz / 1000).toFixed(1)} MHz wide · ${Math.round(c.duty * 100)}% duty`
+  ).join("<br>") + "<br>Bearing unknown: energy detection only. Confirm with acoustic / visual / radar.";
 }
 
 async function post(url, body) {
@@ -362,7 +392,7 @@ function connect() {
   ws.onclose = () => { $("conn").className = ""; setTimeout(connect, 1500); };
   ws.onmessage = (m) => {
     const msg = JSON.parse(m.data);
-    if (msg.t === "status") { status = msg; renderStatus(); }
+    if (msg.t === "status") { status = msg; renderStatus(); renderDrone(msg.drone); }
     else if (msg.t === "frame") {
       if (!preset || msg.preset !== preset.id) return;
       if (msg.nf) { floor = msg.nf; thr = msg.thr; }

@@ -8,6 +8,8 @@ look the way they do on real hardware:
 - ExpressLRS-like control link: 500 kHz packets hopping 13 channels (868)
   or 80 channels (2.4 GHz), 100-250 packets per second
 - Analog FPV VTX: continuous FM video carrier at 5.8 GHz
+- FPV drone (power-on / flight): ELRS 2.4 hopping plus a DJI O4-style
+  10/20 MHz OFDM video block at 5795 MHz
 - Phone: LTE 800 uplink bursts plus Wi-Fi probe bursts at 2.4 GHz
 - PMR446 handheld: push-to-talk FM voice
 - Background (not ours): 433.92 MHz weather station, 868.3 MHz alarm
@@ -214,6 +216,43 @@ class Phone(SimEmitter):
                 out += 0.3 * 10 ** (38 / 10) * shape_flat(freqs, ch, 16.6 * MHZ, preset.bin_hz, skirt=1.5 * MHZ)
 
 
+class FpvDronePower(SimEmitter):
+    """5" FPV on the bench: ELRS 2.4 link up and a DJI O4-style air unit idling.
+
+    ELRS: 812 kHz LoRa packets hopping 80 channels at 250 Hz.
+    Video: persistent OFDM-like block, 10 MHz wide at low power on the ground.
+    """
+
+    id, label, group = "drone_power", "FPV drone power-on (ELRS 2.4 + O4 idle)", "own"
+    lo_hz, hi_hz = 2400 * MHZ, 5850 * MHZ
+    video_fc, video_bw, video_snr, fade_db = 5795 * MHZ, 10 * MHZ, 24.0, 1.0
+
+    def __init__(self, rng, enabled=False):
+        super().__init__(rng, enabled)
+        self.elrs = Elrs2g4(rng, True)
+        self._fade = 0.0
+
+    def visible_in(self, preset):
+        return preset.id == "2g4" or (preset.lo_hz < 5850 * MHZ and preset.hi_hz > 5725 * MHZ)
+
+    def add(self, freqs, preset, t0, t1, out):
+        if preset.lo_hz < 2483.5 * MHZ and preset.hi_hz > 2400 * MHZ:
+            self.elrs.add(freqs, preset, t0, t1, out)
+        if preset.lo_hz < self.video_fc + self.video_bw and preset.hi_hz > self.video_fc - self.video_bw:
+            self._fade = 0.98 * self._fade + float(self.rng.normal(0, self.fade_db * 0.2))
+            snr = self.video_snr + self._fade
+            out += 10 ** (snr / 10) * shape_flat(
+                freqs, self.video_fc, self.video_bw, preset.bin_hz, skirt=0.35 * MHZ
+            )
+
+
+class FpvDroneFlight(FpvDronePower):
+    """Airborne: video at full bandwidth/power with fading as the quad manoeuvres."""
+
+    id, label = "drone_flight", "FPV drone flight (ELRS 2.4 + O4 20 MHz)"
+    video_bw, video_snr, fade_db = 20 * MHZ, 36.0, 4.0
+
+
 class Pmr446(SimEmitter):
     id, label, group = "pmr446", "PMR446 handheld", "own"
     lo_hz, hi_hz = 446.0 * MHZ, 446.2 * MHZ
@@ -251,11 +290,14 @@ class NeighbourWifi(SimEmitter):
     lo_hz, hi_hz = 2451 * MHZ, 2473 * MHZ
 
     def add(self, freqs, preset, t0, t1, out):
-        busy = 0.05 if self.rng.random() > 0.1 else 0.4  # beacons, occasional traffic
-        out += busy * 10 ** (33 / 10) * shape_flat(freqs, 2462 * MHZ, 16.6 * MHZ, preset.bin_hz, skirt=1.5 * MHZ)
+        # ~1 ms beacons every 102 ms plus occasional traffic: bursty, not continuous
+        if self.rng.random() > 0.08:
+            return
+        busy = 0.3 if self.rng.random() > 0.15 else 1.0
+        out += busy * 10 ** (30 / 10) * shape_flat(freqs, 2462 * MHZ, 16.6 * MHZ, preset.bin_hz, skirt=1.5 * MHZ)
 
 
-EMITTER_CLASSES = (Meshtastic, Elrs868, Elrs2g4, Vtx, Phone, Pmr446, WeatherStation, AlarmSensor, NeighbourWifi)
+EMITTER_CLASSES = (Meshtastic, Elrs868, Elrs2g4, Vtx, FpvDronePower, FpvDroneFlight, Phone, Pmr446, WeatherStation, AlarmSensor, NeighbourWifi)
 
 # Auto scenario: (seconds into the loop, action). Loop repeats.
 AUTO_SCENARIO = (
@@ -264,9 +306,15 @@ AUTO_SCENARIO = (
     (55, {"own": ["meshtastic", "elrs868"]}),
     (90, {"preset": "5g8", "own": ["meshtastic", "elrs868", "vtx"]}),
     (115, {"preset": "lte800", "own": ["meshtastic", "elrs868", "vtx", "phone"]}),
-    (140, {"preset": "868", "own": []}),
+    # Drone threat segment: power-on on the 2.4 GHz band, video on 5.8, then flight.
+    (140, {"preset": "2g4", "own": ["drone_power"]}),
+    (160, {"preset": "5g8", "own": ["drone_power"]}),
+    (180, {"preset": "5g8", "own": ["drone_flight"]}),
+    (200, {"preset": "2g4", "own": ["drone_flight"]}),
+    (220, {"preset": "868", "own": []}),
 )
-AUTO_LOOP_S = 170
+AUTO_LOOP_S = 250
+EXCLUSIVE = {"drone_power": "drone_flight", "drone_flight": "drone_power"}
 
 
 class SimulatedEnvironment:
@@ -290,6 +338,8 @@ class SimulatedEnvironment:
                 raise KeyError(emitter_id)
             if manual:
                 self.scenario = "manual"
+            if on and emitter_id in EXCLUSIVE:  # one drone: on the bench OR flying
+                self.emitters[EXCLUSIVE[emitter_id]].set_enabled(False, t)
             self.emitters[emitter_id].set_enabled(on, t)
 
     def set_scenario(self, scenario: str, t: float) -> None:

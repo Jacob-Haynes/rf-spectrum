@@ -217,6 +217,7 @@ class Engine:
         self.current_preset: str | None = None
         self.frames_processed = 0
         self.baseline: set[str] = set()  # emitter keys present before own kit was switched on
+        self.event_extra: dict = {}  # merged into every event, e.g. {"simulated": True}
 
     # ------------------------------------------------------------------ public
 
@@ -409,7 +410,12 @@ class Engine:
             tr.run_start = None
         return events
 
+    def record_event(self, ev: dict) -> dict:
+        with self._lock:
+            return self._record(ev)
+
     def _record(self, ev: dict) -> dict:
+        ev.update(self.event_extra)
         ev["id"] = next(self._event_ids)
         self.events.append(ev)
         return ev

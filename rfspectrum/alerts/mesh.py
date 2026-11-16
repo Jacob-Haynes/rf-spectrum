@@ -27,9 +27,17 @@ def build_mesh_payload(text: str, to: str | None = None, channel: int = 0, sourc
     return json.dumps({"text": text, "to": to, "channel": channel, "source": source})
 
 
-def emitter_alert_text(emitter: dict) -> str:
+def drone_alert_text(ev: dict, simulated: bool = False) -> str:
+    from rfspectrum.drone import describe
+
+    conf = "HIGH conf" if ev.get("confidence") == "high" else "possible"
+    return f"{'[SIM] ' if simulated else ''}RF: {conf} drone link: {describe(ev)}, bearing unknown"
+
+
+def emitter_alert_text(emitter: dict, simulated: bool = False) -> str:
     return (
-        f"RF: new emitter {emitter['freq_mhz']:.3f}MHz "
+        ("[SIM] " if simulated else "")
+        + f"RF: new emitter {emitter['freq_mhz']:.3f}MHz "
         f"~{emitter['bw_khz']:.0f}kHz +{emitter['peak_snr_db']:.0f}dB "
         f"({emitter['name']})"
     )

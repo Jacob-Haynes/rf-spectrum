@@ -52,6 +52,7 @@ class Settings:
     sim_seed: int | None = None
     alert_mesh: bool = False
     alert_cot: bool = False
+    alert_drone: bool = True  # drone-link alerts use mesh/CoT only if those are enabled
     watch_bands: list[tuple[float, float]] = field(default_factory=list)
     alert_min_interval_s: float = 60.0
     mesh_to: str | None = None
@@ -97,6 +98,7 @@ class Settings:
             sim_seed=int(seed) if seed else None,
             alert_mesh=_flag("ALERT_MESH"),
             alert_cot=_flag("ALERT_COT"),
+            alert_drone=_flag("ALERT_DRONE", True),
             watch_bands=parse_bands(_env("WATCH_BANDS", "863-870")),
             alert_min_interval_s=float(_env("ALERT_MIN_INTERVAL_S", "60")),
             mesh_to=_env("MESH_TO") or None,

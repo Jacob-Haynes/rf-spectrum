@@ -133,10 +133,19 @@ DEFAULT_RULES: tuple[Rule, ...] = (
         advice="Disable hotspots and Wi-Fi on phones, GoPros and 360 cameras.",
     ),
     Rule(
+        id="dji_video_5g8",
+        name="Digital FPV video 5.8 GHz (DJI O3/O4-style)",
+        lo_mhz=5725.0, hi_mhz=5850.0, kind="fixed",
+        min_bw_khz=8000, max_bw_khz=45000, min_duration_s=2.0,
+        likely="Digital FPV video downlink (DJI O3/O4, Walksnail, HDZero): persistent 10/20/40 MHz block",
+        advice="Digital video links transmit continuously while the air unit is powered, even on the "
+        "ground. Power the air unit only when needed and use the lowest power setting.",
+    ),
+    Rule(
         id="vtx_5g8",
         name="Analog FPV video 5.8 GHz",
         lo_mhz=5640.0, hi_mhz=5950.0, kind="fixed",
-        min_bw_khz=3000, min_duration_s=1.0,
+        min_bw_khz=3000, max_bw_khz=7000, min_duration_s=1.0,
         likely="Analog FPV video transmitter (continuous carrier)",
         advice="A VTX is a 100% duty-cycle beacon. Use pit/low-power mode on the ground "
         "and only power the VTX when airborne.",

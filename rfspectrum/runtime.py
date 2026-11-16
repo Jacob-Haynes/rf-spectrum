@@ -11,11 +11,12 @@ from pathlib import Path
 
 import numpy as np
 
-from rfspectrum.alerts.cot import CotClient, build_emitter_cot
+from rfspectrum.alerts.cot import CotClient, build_drone_cot, build_emitter_cot
 from rfspectrum.alerts.heartbeat import Heartbeat
-from rfspectrum.alerts.mesh import MeshPublisher, emitter_alert_text
+from rfspectrum.alerts.mesh import MeshPublisher, drone_alert_text, emitter_alert_text
 from rfspectrum.bands import PRESETS, get_preset
 from rfspectrum.config import Settings
+from rfspectrum.drone import DroneLinkDetector
 from rfspectrum.engine import Emitter, Engine
 from rfspectrum.frame import Frame
 from rfspectrum.rules import load_rules
@@ -82,6 +83,10 @@ class Runtime:
             window_s=settings.window_s,
             on_event=self._on_event,
         )
+        if settings.backend == "sim":
+            self.engine.event_extra = {"simulated": True}
+        self.drone = DroneLinkDetector()
+        self._drone_t = 0.0
         self.preset_id = settings.preset if settings.preset in PRESETS else "868"
         self.scan = False
         self._scan_since = time.time()
@@ -211,6 +216,11 @@ class Runtime:
 
     def handle_frame(self, frame: Frame) -> list[dict]:
         events = self.engine.process(frame)
+        if frame.ts - self._drone_t >= 1.0:
+            self._drone_t = frame.ts
+            dev = self.drone.evaluate(self.engine.get_emitters(frame.ts), frame.ts)
+            if dev is not None:
+                events.append(self._on_drone(dev))
         self._frame_count += 1
         self._fps_n += 1
         now = time.time()
@@ -267,13 +277,31 @@ class Runtime:
         f = em.freq_mhz * 1e6
         return any(lo <= f <= hi for lo, hi in self.settings.watch_bands)
 
-    def _on_event(self, ev: dict, em: Emitter) -> None:
+    @property
+    def simulated(self) -> bool:
+        return self.settings.backend == "sim"
+
+    def _log_event(self, ev: dict) -> None:
         if self._event_log is not None:
             try:
                 with self._event_log.open("a") as fh:
                     fh.write(json.dumps(ev) + "\n")
             except OSError as e:
                 logger.warning("event log write failed: %s", e)
+
+    def _on_drone(self, ev: dict) -> dict:
+        ev = self.engine.record_event(ev)
+        self._log_event(ev)
+        logger.warning("%s%s (%s)", "[SIM] " if self.simulated else "", ev["name"], ev["confidence"])
+        if ev["type"] == "drone" and ev.get("escalation") and self.settings.alert_drone:
+            if self.mesh:
+                self.mesh.send(drone_alert_text(ev, self.simulated))
+            if self.cot:
+                self.cot.send(build_drone_cot(ev, self.settings.sensor_lat, self.settings.sensor_lon, self.simulated))
+        return ev
+
+    def _on_event(self, ev: dict, em: Emitter) -> None:
+        self._log_event(ev)
         if ev["type"] != "start" or not ev["new_emitter"] or em.key in self.engine.baseline:
             return
         if not self._watched(em):
@@ -283,9 +311,10 @@ class Runtime:
             "peak_snr_db": em.peak_snr_db, "likely": em.likely,
         }
         if self.mesh:
-            self.mesh.send(emitter_alert_text(info))
+            self.mesh.send(emitter_alert_text(info, self.simulated))
         if self.cot:
-            self.cot.send(build_emitter_cot(info, self.settings.sensor_lat, self.settings.sensor_lon))
+            self.cot.send(build_emitter_cot(
+                info, self.settings.sensor_lat, self.settings.sensor_lon, simulated=self.simulated))
 
     # ------------------------------------------------------------ status
 
@@ -308,6 +337,7 @@ class Runtime:
             "emcon": self.engine.get_emcon(),
             "emitters": self.engine.get_emitters(),
             "sim": self.sim.state() if self.sim else None,
+            "drone": dict(self.drone.state(), simulated=self.simulated),
             "gemini": {"enabled": self.settings.gemini_enabled, "model": self.settings.gemini_model},
             "alerts": {
                 "mesh": self.settings.alert_mesh,

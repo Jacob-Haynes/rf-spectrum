@@ -145,7 +145,8 @@ receiver, VTX/quad battery, and phones in flight mode. Select **868 MHz SRD / Lo
    waterfall fills with dashes hopping across 863–870 MHz, and the rule *Frequency hopper
    863–870* fires with a **~90–100% duty cycle**. The score drops to LOUD. Lesson: an RC link
    transmits the whole time the handset is on, whether you're flying or not.
-4. **FPV VTX on (2 min).** *Needs a HackRF, or use the simulator.* Switch to **5.8 GHz FPV
+4. **FPV VTX on (2 min).** *Needs a HackRF, or use the simulator (FPV drone power-on / flight
+   toggles for a DJI O3/O4 quad; see [Drone link signature](#drone-link-signature-counter-uas-segment)).* Switch to **5.8 GHz FPV
    video** and power the quad. A fat continuous carrier appears at the VTX channel. Lesson:
    an analog VTX is a 100% duty-cycle beacon. Use pit or low-power mode on the ground, and
    power the VTX only when airborne.
@@ -163,7 +164,48 @@ With only an RTL-SDR, step 4 can't be shown live. Run that segment with the simu
 the HackRF.
 
 In simulate mode, **Auto demo** runs the same story unattended (quiet → Meshtastic → ELRS →
-VTX on 5.8 → phone on LTE 800 → all off), and **Manual** gives you a toggle for each radio.
+VTX on 5.8 → phone on LTE 800 → FPV drone power-on on 2.4 then 5.8 → drone flight → all off), and **Manual** gives you a toggle for each radio.
+
+## Drone link signature (counter-UAS segment)
+
+The reference drone is a 5" FPV with **ExpressLRS 2.4 GHz** control and **DJI O3/O4** video at
+5.8 GHz. rf-spectrum looks for its RF signature using energy and occupancy only, with nothing
+decoded:
+
+| Component | Rule | What it looks like |
+|---|---|---|
+| Control link (C2) | `hopper_2g4` | many short narrowband bursts hopping across roughly 2400–2480 MHz at a high packet rate |
+| Digital video | `dji_video_5g8` | a persistent 10/20/40 MHz wideband block in 5725–5850 MHz |
+| Analog video | `vtx_5g8` | a 3–7 MHz FM carrier anywhere in 5640–5950 MHz |
+| 2.4 GHz video (weak evidence) | `wifi_2g4` at ≥90% duty | a near-continuous wideband block at 2.4 GHz, which could just be busy Wi-Fi |
+
+- **One component** firing raises **"Possible drone C2/video link"** (amber banner).
+- **C2 and video together** raise **"Drone C2 + video link (higher confidence)"** (red banner).
+- Each escalation writes a `drone` event to the log. If `ALERT_MESH` / `ALERT_COT` are on (and
+  `ALERT_DRONE=1`, the default), it also sends a `meshbus/tx` text and a CoT **unknown-air**
+  (`a-u-A`) marker at the sensor position, with remarks like *"RF: drone video link 5.8 GHz,
+  bearing unknown"*. Both go through the same rate limits as the other alerts.
+- Anything produced from simulated data is labelled **SIMULATED**: in the UI, as a `SIMULATED:`
+  prefix in the CoT remarks, and as `[SIM]` in the mesh text.
+- Bluetooth also hops at 2.4 GHz and Wi-Fi also fills 2.4 GHz, which is why one component alone
+  is only "possible". Press **Set RF baseline** before the drone powers up.
+
+**Hardware reality.** An RTL-SDR tops out near 1.7 GHz, so it **cannot see 2.4 or 5.8 GHz**.
+Detecting this drone live needs a **HackRF One**, or another receiver that reaches 6 GHz,
+through the existing `hackrf_sweep` backend. One HackRF covers both bands with **Auto-scan**,
+because each band keeps its last-known state while the other is being swept. Without one, run
+this segment in simulate mode: the **FPV drone power-on** and **FPV drone flight** toggles
+(also part of **Auto demo**) generate ELRS 2.4 hopping and an O4-style 10/20 MHz video block.
+
+**Bearings.** This sensor reports *that* a link exists, not *where*. With a directional panel
+or Yagi antenna on the HackRF, you can take a manual bearing: sweep the antenna slowly and note
+where the video block peaks on the spectrum. Two bearings from different positions give a rough
+fix.
+
+**Teaching point.** Real counter-drone systems never rely on RF alone. They layer **RF**
+(this tool), **acoustic** (acoustic-detector), **visual/EO-IR** (fpv-vision, op-sentry) and
+**radar**. An autonomous drone with no video link, or one flying on a pre-planned route with
+its radios off, is invisible to RF detection.
 
 ## How detection works
 

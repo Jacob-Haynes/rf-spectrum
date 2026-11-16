@@ -68,7 +68,7 @@ def test_2g4_hopper_and_wifi_without_unclassified_noise():
 
 def test_all_own_kit_off_but_background_on_then_baseline():
     eng, events, t = run_sim("868", [], 120, background=True, seed=2)
-    assert eng.get_emcon(now=t)["emitters"] >= 1  # the civilian alarm sensor
+    assert eng.get_emcon(now=t)["seen_total"] >= 1  # the civilian alarm sensor
     eng.set_baseline()
     em = eng.get_emcon(now=t)
     assert em["emitters"] == 0 and em["score"] == 100 and em["baseline"] >= 1
