@@ -1,0 +1,9 @@
+[project]
+name = "rf-spectrum"
+version = "0.1.0"
+description = "Receive-only RF spectrum awareness / EMCON training demo"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

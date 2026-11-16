@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RF Spectrum · EMCON</title>
+<style>
+  :root {
+    --bg: #0b0f0c; --panel: #121915; --panel2: #18211b; --line: #26332a;
+    --text: #d6e2d8; --muted: #7f9284; --accent: #6fdc8c; --amber: #f2b84b;
+    --red: #ff5f56; --blue: #5aa9ff; --violet: #b48cff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 15px; margin: 0 10px 0 0; letter-spacing: .08em; }
+  .badge { padding: 2px 8px; border-radius: 3px; border: 1px solid var(--line); font-size: 11px;
+    letter-spacing: .06em; white-space: nowrap; }
+  .b-rx { color: var(--accent); border-color: var(--accent); }
+  .b-sim { color: #111; background: var(--amber); border-color: var(--amber); font-weight: 700; }
+  .b-live { color: #111; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+  .b-cloud { color: var(--violet); border-color: var(--violet); }
+  .spacer { flex: 1; }
+  #conn { width: 9px; height: 9px; border-radius: 50%; background: var(--red); display: inline-block; }
+  #conn.ok { background: var(--accent); }
+  .bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 14px;
+    border-bottom: 1px solid var(--line); }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    padding: 5px 10px; border-radius: 3px; font: inherit; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.on { background: var(--accent); color: #0b0f0c; border-color: var(--accent); font-weight: 700; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button small { color: var(--amber); margin-left: 4px; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 10px; padding: 10px 14px; }
+  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 10px; }
+  .panel h2 { font-size: 11px; letter-spacing: .12em; color: var(--muted); margin: 0 0 8px;
+    text-transform: uppercase; display: flex; justify-content: space-between; align-items: baseline; }
+  #specwrap { position: relative; }
+  canvas { display: block; width: 100%; image-rendering: pixelated; }
+  #spectrum { height: 210px; background: #070a08; }
+  #alloc { height: 34px; background: #070a08; }
+  #waterfall { height: 380px; background: #000; }
+  #axis { height: 20px; background: #070a08; }
+  #readout { position: absolute; top: 6px; right: 8px; color: var(--muted); font-size: 11px;
+    background: rgba(0,0,0,.5); padding: 2px 6px; pointer-events: none; }
+  #presetdesc { color: var(--muted); padding: 6px 2px 0; }
+  #note { color: var(--amber); }
+  .score { display: flex; align-items: center; gap: 16px; }
+  #score { font-size: 54px; font-weight: 700; line-height: 1; min-width: 92px; text-align: center; }
+  #grade { font-size: 16px; font-weight: 700; letter-spacing: .1em; }
+  .g-SILENT { color: var(--accent); } .g-LOW { color: #b6e36f; }
+  .g-ELEVATED { color: var(--amber); } .g-LOUD { color: var(--red); }
+  .kv { color: var(--muted); } .kv b { color: var(--text); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th { text-align: left; color: var(--muted); font-weight: 400; border-bottom: 1px solid var(--line); padding: 3px 4px; }
+  td { padding: 3px 4px; border-bottom: 1px solid #1a241d; vertical-align: top; }
+  tr.inactive td { color: var(--muted); }
+  tr.baseline td { color: #56645a; text-decoration: line-through; }
+  .duty { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 2px; }
+  .duty > i { display: block; height: 100%; background: var(--amber); }
+  .scroll { max-height: 260px; overflow: auto; }
+  .ev-start td:first-child { border-left: 3px solid var(--red); }
+  .ev-end td:first-child { border-left: 3px solid var(--line); }
+  .new { color: #0b0f0c; background: var(--red); padding: 0 4px; border-radius: 2px; font-size: 10px; }
+  #debrief { white-space: pre-wrap; color: var(--text); background: var(--panel2); padding: 8px;
+    border-radius: 3px; margin-top: 8px; display: none; max-height: 260px; overflow: auto; }
+  .simgrid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .simgroup { color: var(--muted); width: 100%; margin-top: 6px; font-size: 11px; }
+  .stack > .panel + .panel { margin-top: 10px; }
+  footer { color: var(--muted); padding: 8px 14px 16px; font-size: 11px; }
+  .lesson { color: var(--muted); font-size: 12px; margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>RF SPECTRUM · EMCON</h1>
+  <span class="badge b-rx" title="This tool never transmits and never decodes content">RECEIVE ONLY · ENERGY DETECTION</span>
+  <span id="mode" class="badge">…</span>
+  <span id="ai" class="badge">AI: …</span>
+  <span id="alerts" class="badge">alerts …</span>
+  <span class="spacer"></span>
+  <span class="kv"><span id="fps">0</span> fps</span>
+  <span id="conn" title="WebSocket"></span>
+</header>
+
+<div class="bar" id="presets"></div>
+
+<main>
+  <div class="stack">
+    <div class="panel">
+      <h2><span id="ptitle">Spectrum</span><span id="note"></span></h2>
+      <div id="specwrap">
+        <canvas id="spectrum" width="1024" height="210"></canvas>
+        <div id="readout"></div>
+      </div>
+      <canvas id="alloc" width="1024" height="34"></canvas>
+      <canvas id="waterfall" width="1024" height="380"></canvas>
+      <canvas id="axis" width="1024" height="20"></canvas>
+      <div id="presetdesc"></div>
+    </div>
+    <div class="panel">
+      <h2><span>Event log</span><span class="kv">power over noise floor, held for a duration, in a band → event</span></h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Time</th><th></th><th>Signal</th><th>MHz</th><th>kHz</th><th>dB</th><th>Dur</th></tr></thead>
+        <tbody id="events"></tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <div class="stack">
+    <div class="panel">
+      <h2><span>EMCON score</span><span class="kv">last <span id="win">60</span> s</span></h2>
+      <div class="score">
+        <div id="score">—</div>
+        <div>
+          <div id="grade">—</div>
+          <div class="kv">emitters <b id="nem">0</b> · worst duty <b id="mduty">0%</b></div>
+          <div class="kv">seen this session <b id="seen">0</b> · baselined <b id="nbase">0</b></div>
+        </div>
+      </div>
+      <div class="lesson">100 = nothing heard. Each emitter costs 15; the busiest emitter's duty cycle costs up to 50.
+        Anyone with a £30 receiver can see what this screen sees.</div>
+      <div class="bar" style="padding:8px 0 0;border:0">
+        <button id="btnBase" title="Mark everything heard so far as environment background (not scored)">Set RF baseline</button>
+        <button id="btnClearBase">Clear baseline</button>
+        <button id="btnReset">Reset</button>
+        <button id="btnDebrief">Debrief</button>
+      </div>
+      <div id="debrief"></div>
+    </div>
+    <div class="panel">
+      <h2><span>Emitters</span></h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Signal</th><th>MHz</th><th>Duty</th></tr></thead>
+        <tbody id="emitters"></tbody>
+      </table></div>
+    </div>
+    <div class="panel" id="simpanel" style="display:none">
+      <h2><span>Simulator</span><span>
+        <button id="scAuto">Auto demo</button> <button id="scManual">Manual</button></span></h2>
+      <div class="simgrid" id="sim"></div>
+      <div class="lesson">Demo: start quiet, then switch on the Meshtastic node, the ELRS link and the VTX one by one.</div>
+    </div>
+  </div>
+</main>
+<footer>
+  Receive-only training aid. Measures energy per frequency bin; does not demodulate or decode any transmission.
+  Never transmit, jam or replay. Allocation labels summarise Ofcom IR 2030 / ERC Rec 70-03 for training only.
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const spec = $("spectrum"), sctx = spec.getContext("2d");
+const wf = $("waterfall"), wctx = wf.getContext("2d");
+const al = $("alloc"), actx = al.getContext("2d");
+const ax = $("axis"), xctx = ax.getContext("2d");
+let status = null, preset = null, floor = null, thr = 10, peak = null, lastP = null;
+let events = [], lastKey = {};
+
+// ---- colour map (dark -> blue -> cyan -> yellow -> red -> white)
+const STOPS = [[0,[0,0,0]],[.15,[10,20,80]],[.35,[20,90,200]],[.55,[40,200,200]],[.72,[240,230,60]],[.88,[250,80,30]],[1,[255,255,255]]];
+const LUT = new Uint8ClampedArray(256 * 3);
+for (let i = 0; i < 256; i++) {
+  const x = i / 255; let k = 0;
+  while (k < STOPS.length - 2 && x > STOPS[k + 1][0]) k++;
+  const [x0, c0] = STOPS[k], [x1, c1] = STOPS[k + 1], f = (x - x0) / (x1 - x0);
+  for (let j = 0; j < 3; j++) LUT[i * 3 + j] = c0[j] + (c1[j] - c0[j]) * f;
+}
+
+function median(a) { const s = Array.from(a).sort((x, y) => x - y); return s[s.length >> 1]; }
+function fmtTime(ts) { return new Date(ts * 1000).toLocaleTimeString([], {hour12: false}); }
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function changed(key, val) { const s = JSON.stringify(val); if (lastKey[key] === s) return false; lastKey[key] = s; return true; }
+
+function range() {
+  const nf = floor ? median(floor) : (lastP ? median(lastP) : -100);
+  return [nf - 8, nf + 55];
+}
+
+function drawWaterfallRow(p) {
+  const [lo, hi] = range(), n = p.length;
+  wctx.drawImage(wf, 0, 0, wf.width, wf.height - 1, 0, 1, wf.width, wf.height - 1);
+  const row = wctx.createImageData(wf.width, 1);
+  for (let x = 0; x < wf.width; x++) {
+    const v = p[Math.floor(x * n / wf.width)];
+    const i = Math.max(0, Math.min(255, Math.round((v - lo) / (hi - lo) * 255)));
+    row.data[x * 4] = LUT[i * 3]; row.data[x * 4 + 1] = LUT[i * 3 + 1];
+    row.data[x * 4 + 2] = LUT[i * 3 + 2]; row.data[x * 4 + 3] = 255;
+  }
+  wctx.putImageData(row, 0, 0);
+}
+
+function drawSpectrum(p, hits) {
+  const W = spec.width, H = spec.height, [lo, hi] = range(), n = p.length;
+  const y = (v) => H - (v - lo) / (hi - lo) * H;
+  sctx.fillStyle = "#070a08"; sctx.fillRect(0, 0, W, H);
+  sctx.strokeStyle = "#1a241d"; sctx.lineWidth = 1; sctx.fillStyle = "#56645a"; sctx.font = "10px monospace";
+  for (let d = Math.ceil(lo / 10) * 10; d < hi; d += 10) {
+    sctx.beginPath(); sctx.moveTo(0, y(d)); sctx.lineTo(W, y(d)); sctx.stroke();
+    sctx.fillText(d + " dB", 3, y(d) - 2);
+  }
+  if (!peak || peak.length !== n) peak = Float32Array.from(p);
+  for (let i = 0; i < n; i++) peak[i] = Math.max(p[i], peak[i] - 0.4);
+  const line = (arr, color, dash, offs = 0) => {
+    sctx.strokeStyle = color; sctx.setLineDash(dash); sctx.beginPath();
+    for (let i = 0; i < n; i++) { const X = i * W / n, Y = y(arr[i] + offs); i ? sctx.lineTo(X, Y) : sctx.moveTo(X, Y); }
+    sctx.stroke(); sctx.setLineDash([]);
+  };
+  line(peak, "rgba(242,184,75,.35)", []);
+  if (floor && floor.length === n) { line(floor, "rgba(90,169,255,.6)", [4, 4]); line(floor, "rgba(255,95,86,.55)", [2, 4], thr); }
+  // filled live trace
+  sctx.beginPath(); sctx.moveTo(0, H);
+  for (let i = 0; i < n; i++) sctx.lineTo(i * W / n, y(p[i]));
+  sctx.lineTo(W, H); sctx.closePath(); sctx.fillStyle = "rgba(111,220,140,.12)"; sctx.fill();
+  line(p, "#6fdc8c", []);
+  if (preset) {
+    sctx.fillStyle = "rgba(255,95,86,.9)";
+    for (const h of hits || []) {
+      const X = (h.f - preset.lo_mhz) / (preset.hi_mhz - preset.lo_mhz) * W;
+      sctx.beginPath(); sctx.moveTo(X, 2); sctx.lineTo(X - 4, 10); sctx.lineTo(X + 4, 10); sctx.fill();
+    }
+  }
+}
+
+function drawAlloc() {
+  if (!preset) return;
+  const W = al.width, H = al.height, span = preset.hi_mhz - preset.lo_mhz;
+  actx.fillStyle = "#070a08"; actx.fillRect(0, 0, W, H);
+  const colors = { srd: "#2f7a49", ism: "#2c5d8a", licensed: "#5b4a7a", warn: "#7a3a2c" };
+  const allocs = [...preset.allocations].sort((a, b) => (b.hi_mhz - b.lo_mhz) - (a.hi_mhz - a.lo_mhz));
+  allocs.forEach((a, k) => {
+    const x0 = (a.lo_mhz - preset.lo_mhz) / span * W, x1 = (a.hi_mhz - preset.lo_mhz) / span * W;
+    const wide = (a.hi_mhz - a.lo_mhz) / span > 0.9, yy = wide ? 24 : 2, hh = wide ? 9 : 20;
+    actx.fillStyle = colors[a.kind] || "#333"; actx.fillRect(x0 + 1, yy, Math.max(2, x1 - x0 - 2), hh);
+    actx.fillStyle = "#e8f0ea"; actx.font = "10px monospace";
+    actx.save(); actx.beginPath(); actx.rect(x0, yy, x1 - x0, hh); actx.clip();
+    actx.fillText(a.label + (a.note && !wide ? " · " + a.note : ""), x0 + 4, yy + (wide ? 8 : 14)); actx.restore();
+  });
+  xctx.fillStyle = "#070a08"; xctx.fillRect(0, 0, ax.width, ax.height);
+  xctx.fillStyle = "#7f9284"; xctx.font = "10px monospace";
+  for (let i = 0; i <= 8; i++) {
+    const f = preset.lo_mhz + span * i / 8, X = i * ax.width / 8;
+    xctx.fillRect(X, 0, 1, 4);
+    const t = f.toFixed(span < 2 ? 3 : span < 50 ? 1 : 0);
+    xctx.fillText(t, Math.min(Math.max(0, X - 18), ax.width - 44), 15);
+  }
+}
+
+function renderPresets() {
+  if (!changed("presets", [status.presets.map(p => [p.id, p.available]), status.preset, status.scan])) return;
+  const bar = $("presets"); bar.innerHTML = "";
+  for (const p of status.presets) {
+    const b = document.createElement("button");
+    b.innerHTML = esc(p.name) + (p.available ? "" : "<small>needs HackRF</small>");
+    b.disabled = !p.available; b.className = p.id === status.preset ? "on" : "";
+    b.title = p.description;
+    b.onclick = () => post("/api/preset", {id: p.id});
+    bar.appendChild(b);
+  }
+  const s = document.createElement("button");
+  s.textContent = "Auto-scan " + (status.scan ? "ON" : "off"); s.className = status.scan ? "on" : "";
+  s.title = `Cycle through every available band (${status.scan_dwell_s}s each) with one receiver`;
+  s.onclick = () => post("/api/scan", {on: !status.scan});
+  bar.appendChild(s);
+}
+
+function renderStatus() {
+  const live = status.mode === "live";
+  $("mode").className = "badge " + (live ? "b-live" : "b-sim");
+  $("mode").textContent = live ? "LIVE · " + status.source : "SIMULATED · no SDR";
+  $("ai").className = "badge " + (status.gemini.enabled ? "b-cloud" : "");
+  $("ai").textContent = status.gemini.enabled ? "AI: Gemini cloud (" + status.gemini.model + ")" : "AI: offline";
+  const a = status.alerts;
+  $("alerts").textContent = `mesh alert ${a.mesh ? "ON" : "off"} · CoT ${a.cot ? (a.cot_connected ? "ON" : "ON (TAK down)") : "off"}`;
+  $("alerts").title = "Watched bands (MHz): " + a.watch_bands_mhz.map(b => b.join("-")).join(", ");
+  $("fps").textContent = status.fps; thr = status.threshold_db;
+  $("note").textContent = status.note || "";
+  const p = status.presets.find(x => x.id === status.preset);
+  if (!preset || p.id !== preset.id) {
+    preset = p; floor = null; peak = null;
+    wctx.fillStyle = "#000"; wctx.fillRect(0, 0, wf.width, wf.height);
+    drawAlloc();
+  }
+  $("ptitle").textContent = `${p.name} · ${p.lo_mhz}–${p.hi_mhz} MHz · ${p.bin_khz} kHz/bin`;
+  $("presetdesc").textContent = p.description;
+  renderPresets();
+
+  const e = status.emcon;
+  $("score").textContent = e.score; $("score").className = "g-" + e.grade;
+  $("grade").textContent = e.grade; $("grade").className = "g-" + e.grade;
+  $("nem").textContent = e.emitters; $("mduty").textContent = Math.round(e.max_duty * 100) + "%";
+  $("seen").textContent = e.seen_total; $("nbase").textContent = e.baseline; $("win").textContent = e.window_s;
+
+  if (changed("emitters", status.emitters.map(x => [x.key, x.active, x.baseline, Math.round(x.duty * 100), x.freq_mhz.toFixed(3)]))) {
+    $("emitters").innerHTML = status.emitters.map(x => `
+      <tr class="${x.baseline ? "baseline" : x.active ? "" : "inactive"}" title="${esc(x.likely)}">
+        <td>${esc(x.name)}${x.monitored ? "" : " <span class='kv'>(last known: band not monitored now)</span>"}<br>
+            <span class="kv">${esc(x.likely)}</span></td>
+        <td>${x.freq_mhz.toFixed(3)}<br><span class="kv">${Math.round(x.bw_khz)} kHz</span></td>
+        <td style="min-width:70px">${Math.round(x.duty * 100)}%<div class="duty"><i style="width:${Math.round(x.duty * 100)}%"></i></div></td>
+      </tr>`).join("") || `<tr><td colspan="3" class="kv">Nothing heard yet.</td></tr>`;
+  }
+
+  if (status.sim) {
+    $("simpanel").style.display = "";
+    $("scAuto").className = status.sim.scenario === "auto" ? "on" : "";
+    $("scManual").className = status.sim.scenario === "manual" ? "on" : "";
+    if (changed("sim", status.sim)) {
+      const groups = {own: "Our kit", background: "Background (civilian, not ours)"};
+      $("sim").innerHTML = Object.entries(groups).map(([g, label]) =>
+        `<div class="simgroup">${label}</div>` + status.sim.emitters.filter(x => x.group === g).map(x =>
+          `<button class="${x.enabled ? "on" : ""}" data-id="${x.id}" data-on="${!x.enabled}">${x.enabled ? "■" : "□"} ${esc(x.label)}</button>`
+        ).join("")).join("");
+      $("sim").querySelectorAll("button").forEach(b =>
+        b.onclick = () => post("/api/sim/emitter", {id: b.dataset.id, on: b.dataset.on === "true"}));
+    }
+  }
+}
+
+function renderEvents() {
+  $("events").innerHTML = events.slice(0, 200).map(e => `
+    <tr class="ev-${e.type}">
+      <td>${fmtTime(e.ts)}</td>
+      <td>${e.type === "start" ? "▲" : "▼"}${e.new_emitter ? ' <span class="new">NEW</span>' : ""}</td>
+      <td>${esc(e.name)}</td><td>${e.freq_mhz.toFixed(3)}</td><td>${Math.round(e.bw_khz)}</td>
+      <td>${e.snr_db}</td><td>${e.duration_s == null ? "" : e.duration_s + "s"}</td>
+    </tr>`).join("") || `<tr><td colspan="7" class="kv">No events. A quiet band is the goal.</td></tr>`;
+}
+
+async function post(url, body) {
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  return r.json();
+}
+
+$("btnBase").onclick = () => post("/api/baseline", {action: "set"});
+$("btnClearBase").onclick = () => post("/api/baseline", {action: "clear"});
+$("btnReset").onclick = async () => { await post("/api/reset"); events = []; renderEvents(); };
+$("scAuto").onclick = () => post("/api/sim/scenario", {scenario: "auto"});
+$("scManual").onclick = () => post("/api/sim/scenario", {scenario: "manual"});
+$("btnDebrief").onclick = async () => {
+  const box = $("debrief"); box.style.display = "block"; box.textContent = "Thinking…";
+  const d = await post("/api/debrief");
+  box.textContent = `[${d.mode}]\n\n` + d.text;
+};
+
+spec.addEventListener("mousemove", (ev) => {
+  if (!preset || !lastP) return;
+  const r = spec.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width;
+  const i = Math.min(lastP.length - 1, Math.max(0, Math.floor(x * lastP.length)));
+  const f = preset.lo_mhz + x * (preset.hi_mhz - preset.lo_mhz);
+  const snr = floor ? (lastP[i] - floor[i]).toFixed(1) : "?";
+  $("readout").textContent = `${f.toFixed(4)} MHz · ${lastP[i].toFixed(1)} dB · +${snr} dB over floor`;
+});
+spec.addEventListener("mouseleave", () => $("readout").textContent = "");
+
+function connect() {
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws.onopen = () => $("conn").className = "ok";
+  ws.onclose = () => { $("conn").className = ""; setTimeout(connect, 1500); };
+  ws.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (msg.t === "status") { status = msg; renderStatus(); }
+    else if (msg.t === "frame") {
+      if (!preset || msg.preset !== preset.id) return;
+      if (msg.nf) { floor = msg.nf; thr = msg.thr; }
+      lastP = msg.p; drawSpectrum(msg.p, msg.hits); drawWaterfallRow(msg.p);
+    } else if (msg.t === "event") { events.unshift(msg.event); events = events.slice(0, 300); renderEvents(); }
+  };
+}
+fetch("/api/events").then(r => r.json()).then(e => { events = e; renderEvents(); });
+connect();
+</script>
+</body>
+</html>
