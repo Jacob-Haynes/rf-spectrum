@@ -5,6 +5,8 @@
    connect is never bound, so nothing it sends is delivered.
 3. A registration whose callsign is already held by a different uid is refused.
 
+It also applies OTS's marker *storage* rules (C5.5) to delivered events, see `storable`.
+
 Timings are scaled down (bind_after_s=0.3) so the suite stays fast.
 """
 
@@ -32,6 +34,7 @@ class FakeOTS:
         self.delivered: list[ET.Element] = []
         self.dropped: list[tuple[str, str]] = []  # (reason, uid)
         self.registrations: list[str] = []
+        self.stored: list[ET.Element] = []
         self.conns: list[socket.socket] = []
         self.lock = threading.Lock()
         threading.Thread(target=self._accept, daemon=True).start()
@@ -85,6 +88,8 @@ class FakeOTS:
                 self.dropped.append(("unregistered-sender", uid))
                 return
             self.delivered.append(ev)
+            if storable(ev, set(self.registrations)):
+                self.stored.append(ev)
 
     def marker_uids(self):
         with self.lock:
@@ -102,6 +107,25 @@ class FakeOTS:
     def close(self):
         self.kick_all()
         self.srv.close()
+
+
+STORABLE_TYPE = re.compile(r"^a-[fhupansjk]-[ZPAGSUF]|^b-m-p")
+
+
+def storable(ev, eud_uids) -> bool:
+    """OTS 1.8.3 stores a marker only if all of these hold."""
+    t = ev.get("type", "")
+    if not STORABLE_TYPE.match(t) or t.startswith("b-m-p-s-p-loc") or t == "a-f-G-E-S":
+        return False
+    if ev.find("detail/takv") is not None:
+        return False
+    contact = ev.find("detail/contact")
+    if contact is not None and contact.get("endpoint") is not None:
+        return False
+    pt = ev.find("point")
+    if pt is None or (float(pt.get("lat")) == 0 and float(pt.get("lon")) == 0):
+        return False
+    return all(link.get("uid") in eud_uids for link in ev.findall("detail/link"))
 
 
 DRONE_EV = {"type": "drone", "name": "Possible drone C2/video link", "confidence": "possible",
@@ -209,6 +233,47 @@ def test_tak_down_is_harmless_and_logs_once(caplog):
         c.close()
     assert not c.connected
     assert len([r for r in caplog.records if "unavailable" in r.getMessage()]) == 1
+
+
+def test_drone_and_emitter_markers_are_stored_by_ots():
+    from rfspectrum.alerts.cot import build_emitter_cot
+
+    emitter = {"key": "meshtastic_eu", "name": "LoRa (Meshtastic EU)", "freq_mhz": 869.525,
+               "bw_khz": 250.0, "peak_snr_db": 30.0, "likely": "Meshtastic"}
+    ots = FakeOTS()
+    c = _client(ots)
+    for sim in (True, False):
+        parent = {"parent_uid": c.uid, "parent_callsign": c.callsign}
+        c.send(build_drone_cot(DRONE_EV, 52.0, 0.1, simulated=sim, **parent))
+        c.send(build_emitter_cot(emitter, 52.0, 0.1, simulated=sim, **parent))
+    assert _wait(lambda: len(ots.marker_uids()) == 4)
+    with ots.lock:
+        stored = [(e.get("uid"), e.get("type")) for e in ots.stored]
+        link = ots.stored[0].find("detail/link")
+    assert stored.count(("RFSPEC-DRONE", "a-u-A")) == 2
+    assert stored.count(("RFSPEC-meshtastic_eu", "a-u-G")) == 2
+    assert link.get("uid") == "isrkit-rf-spectrum-pi1" and link.get("relation") == "p-p"
+    c.close()
+    ots.close()
+
+
+def test_storability_rules_reject_what_ots_rejects():
+    from rfspectrum.alerts.cot import build_emitter_cot
+
+    eud = {"isrkit-rf-spectrum-pi1"}
+    good = ET.fromstring(build_drone_cot(DRONE_EV, 52.0, 0.1, parent_uid="isrkit-rf-spectrum-pi1"))
+    assert storable(good, eud)
+    # our markers never carry these
+    assert good.find("detail/takv") is None and good.find("detail/contact").get("endpoint") is None
+    # a link to another marker's uid is not storable
+    bad_link = ET.fromstring(build_drone_cot(DRONE_EV, 52.0, 0.1, parent_uid="RFSPEC-meshtastic_eu"))
+    assert not storable(bad_link, eud)
+    # the registration SA itself (takv + endpoint) is not a stored marker
+    assert not storable(ET.fromstring(build_registration_sa("pi1", 52.0, 0.1)), eud)
+    # no position: the builders refuse to produce a marker at all
+    assert build_drone_cot(DRONE_EV, None, None) is None
+    assert build_drone_cot(DRONE_EV, 0.0, 0.0) is None
+    assert build_emitter_cot({"key": "k", "name": "n", "freq_mhz": 1, "bw_khz": 1, "peak_snr_db": 1}, 0, 0) is None
 
 
 ISO_Z = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$")

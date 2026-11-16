@@ -159,4 +159,5 @@ def test_cot_at_sensor_position_when_set(tmp_path, monkeypatch):
     _run(rt, "5g8", 15, t)
     drone = [x for u, x in sent if u == "RFSPEC-DRONE"]
     assert drone and 'lat="52.000100"' in drone[-1] and "SIMULATED: " in drone[-1]
+    assert f'<link uid="{rt.cot.uid}" relation="p-p"' in drone[-1] and "<takv" not in drone[-1]
     rt.cot.close()

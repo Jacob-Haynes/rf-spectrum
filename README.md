@@ -261,8 +261,10 @@ registers on it before sending anything:
   reconnect is accepted (OTS refuses a callsign that another uid already holds).
 - The SA is re-sent every 60 s with a 120 s stale, at `SENSOR_LAT/SENSOR_LON`. With no position
   set, the SA carries a 0,0 point with a 9999999 error and stale = start, so it is never drawn.
-- Markers (new emitters, drone link) go on the same connection after registration, with their
-  own uids. Messages queued while TAK is down are sent after the next registration.
+- Markers (new emitters `a-u-G`, drone link `a-u-A`) go on the same connection after
+  registration, with their own uids. They are built so OTS also **stores** them (and shows them
+  on its web map): no `<takv>`, a `<contact>` with a callsign but no endpoint, a real position
+  (never 0,0), and a `<link relation="p-p">` only to our own registration uid. Messages queued while TAK is down are sent after the next registration.
 
 ### Launcher heartbeat
 

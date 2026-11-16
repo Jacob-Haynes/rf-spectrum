@@ -310,8 +310,10 @@ class Runtime:
             if self.mesh:
                 self.mesh.send(drone_alert_text(ev, self.simulated))
             if self.cot and self.has_position:
-                self.cot.send(build_drone_cot(ev, self.settings.sensor_lat, self.settings.sensor_lon,
-                                              self.simulated), uid=DRONE_UID)
+                xml = build_drone_cot(ev, self.settings.sensor_lat, self.settings.sensor_lon, self.simulated,
+                                      parent_uid=self.cot.uid, parent_callsign=self.cot.callsign)
+                if xml:
+                    self.cot.send(xml, uid=DRONE_UID)
         return ev
 
     def _on_event(self, ev: dict, em: Emitter) -> None:
@@ -327,9 +329,11 @@ class Runtime:
         if self.mesh:
             self.mesh.send(emitter_alert_text(info, self.simulated))
         if self.cot and self.has_position:
-            self.cot.send(build_emitter_cot(
-                info, self.settings.sensor_lat, self.settings.sensor_lon, simulated=self.simulated),
-                uid=emitter_uid(info))
+            xml = build_emitter_cot(info, self.settings.sensor_lat, self.settings.sensor_lon,
+                                    simulated=self.simulated, parent_uid=self.cot.uid,
+                                    parent_callsign=self.cot.callsign)
+            if xml:
+                self.cot.send(xml, uid=emitter_uid(info))
 
     # ------------------------------------------------------------ status
 
