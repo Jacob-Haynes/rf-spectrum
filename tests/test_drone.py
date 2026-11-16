@@ -79,7 +79,7 @@ def test_alert_texts_are_labelled_simulated():
     txt = drone_alert_text(ev, simulated=True)
     assert txt.startswith("[SIM] ") and "drone DJI/digital video link 5.8 GHz" in txt and len(txt) < 200
     assert not drone_alert_text(ev).startswith("[SIM]")
-    root = ET.fromstring(build_drone_cot(ev, 51.1, -1.7, simulated=True))
+    root = ET.fromstring(build_drone_cot(ev, 52.0, 0.1, simulated=True))
     assert root.get("type") == "a-u-A"
     remarks = root.find("detail/remarks").text
     assert remarks.startswith("SIMULATED: RF: drone DJI/digital video link 5.8 GHz, bearing unknown")
@@ -151,12 +151,12 @@ def test_no_cot_without_sensor_position(tmp_path, monkeypatch):
 
 
 def test_cot_at_sensor_position_when_set(tmp_path, monkeypatch):
-    rt = _rt(tmp_path, sim_background=False, alert_cot=True, sensor_lat=51.1789, sensor_lon=-1.8262)
+    rt = _rt(tmp_path, sim_background=False, alert_cot=True, sensor_lat=52.0001, sensor_lon=0.0002)
     sent = []
     monkeypatch.setattr(rt.cot, "send", lambda xml, uid=None: sent.append((uid, xml)))
     rt.sim.set_emitter("drone_flight", True, 1000.0)
     t = _run(rt, "2g4", 15, 1000.0)
     _run(rt, "5g8", 15, t)
     drone = [x for u, x in sent if u == "RFSPEC-DRONE"]
-    assert drone and 'lat="51.178900"' in drone[-1] and "SIMULATED: " in drone[-1]
+    assert drone and 'lat="52.000100"' in drone[-1] and "SIMULATED: " in drone[-1]
     rt.cot.close()

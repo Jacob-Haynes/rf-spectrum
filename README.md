@@ -305,7 +305,7 @@ main settings:
   (Ofcom IR 2030 for SRDs, with power and duty limits). Jamming is illegal. US-region "915"
   ELRS or Meshtastic settings transmit outside UK SRD allocations, so set the **EU 868**
   region and domain.
-- Military users should also follow their own unit's spectrum management and EMCON orders.
+- Organisations should also follow their own spectrum management and EMCON policies.
 
 ## Layout
 
@@ -324,3 +324,7 @@ deploy/          install.sh, start.sh, rf-spectrum.service, rf-spectrum.env.exam
 profiles.d/      rf-spectrum.conf for pi-profiles
 tests/           pytest (runs on a Mac with no hardware)
 ```
+
+## Licence
+
+MIT. See [LICENSE](LICENSE).

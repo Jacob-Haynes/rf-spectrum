@@ -72,7 +72,7 @@ def gemini_debrief(summary: dict, api_key: str, model: str) -> str:
 
     client = genai.Client(api_key=api_key)
     prompt = (
-        "You are an instructor teaching a small army unit about emissions control (EMCON). "
+        "You are an instructor teaching a small team about emissions control (EMCON). "
         "A receive-only spectrum sensor (energy detection only, nothing decoded) produced the "
         "summary below during a training demo. Write a short, plain-English debrief (max 150 words): "
         "what an adversary listening would have learned, and the 3 most useful EMCON actions. "

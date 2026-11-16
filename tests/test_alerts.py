@@ -17,11 +17,11 @@ EMITTER = {
 
 
 def test_cot_xml_is_valid():
-    xml = build_emitter_cot(EMITTER, 51.1, -1.75, now=1_800_000_000)
+    xml = build_emitter_cot(EMITTER, 52.0, 0.1, now=1_800_000_000)
     root = ET.fromstring(xml)
     assert root.tag == "event" and root.get("type") == "a-u-G"
     assert root.get("uid") == "RFSPEC-meshtastic_eu"
-    assert root.find("point").get("lat") == "51.100000"
+    assert root.find("point").get("lat") == "52.000000"
     assert "869.525" in root.find("detail/remarks").text
 
 
@@ -232,10 +232,10 @@ def test_sensor_position_unset_or_zero_is_none(monkeypatch):
         monkeypatch.setenv("SENSOR_LON", lon)
         s = Settings.from_env()
         assert s.sensor_lat is None and s.sensor_lon is None, (lat, lon)
-    monkeypatch.setenv("SENSOR_LAT", "51.1789")
-    monkeypatch.setenv("SENSOR_LON", "-1.8262")
+    monkeypatch.setenv("SENSOR_LAT", "52.0001")
+    monkeypatch.setenv("SENSOR_LON", "0.0002")
     s = Settings.from_env()
-    assert (s.sensor_lat, s.sensor_lon) == (51.1789, -1.8262)
+    assert (s.sensor_lat, s.sensor_lon) == (52.0001, 0.0002)
 
 
 def test_cli_overrides_mqtt_and_tak():
