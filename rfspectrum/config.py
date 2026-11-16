@@ -18,6 +18,17 @@ def _flag(name: str, default: bool = False) -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _sensor_position(lat: str, lon: str) -> dict:
+    """Both set, parseable, in range and not 0,0 -> a position; anything else -> unset."""
+    try:
+        la, lo = float(lat), float(lon)
+    except ValueError:
+        return {"sensor_lat": None, "sensor_lon": None}
+    if not (-90 <= la <= 90 and -180 <= lo <= 180) or (la == 0 and lo == 0):
+        return {"sensor_lat": None, "sensor_lon": None}
+    return {"sensor_lat": la, "sensor_lon": lo}
+
+
 def parse_bands(spec: str) -> list[tuple[float, float]]:
     """'863-870,5640-5950' (MHz) -> [(863e6, 870e6), ...]"""
     out = []
@@ -63,8 +74,9 @@ class Settings:
     mqtt_pass: str = "guest"
     tak_host: str = "127.0.0.1"
     tak_port: int = 8087
-    sensor_lat: float = 0.0
-    sensor_lon: float = 0.0
+    # Contract C4.2: shared OP position. None = unset, and then no CoT point is drawn
+    sensor_lat: float | None = None
+    sensor_lon: float | None = None
     gemini_api_key: str = ""
     gemini_model: str = DEFAULT_GEMINI_MODEL
     heartbeat_s: float = 10.0
@@ -109,8 +121,7 @@ class Settings:
             mqtt_pass=_env("MQTT_PASS", "guest"),
             tak_host=_env("TAK_HOST", "127.0.0.1"),
             tak_port=int(_env("TAK_PORT", "8087")),
-            sensor_lat=float(_env("SENSOR_LAT", "0") or 0),
-            sensor_lon=float(_env("SENSOR_LON", "0") or 0),
+            **_sensor_position(_env("SENSOR_LAT"), _env("SENSOR_LON")),
             gemini_api_key=_env("GEMINI_API_KEY"),
             gemini_model=_env("GEMINI_MODEL") or DEFAULT_GEMINI_MODEL,
             heartbeat_s=float(_env("HEARTBEAT_S", "10")),

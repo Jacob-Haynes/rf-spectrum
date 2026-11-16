@@ -145,11 +145,12 @@ receiver, VTX/quad battery, and phones in flight mode. Select **868 MHz SRD / Lo
    waterfall fills with dashes hopping across 863–870 MHz, and the rule *Frequency hopper
    863–870* fires with a **~90–100% duty cycle**. The score drops to LOUD. Lesson: an RC link
    transmits the whole time the handset is on, whether you're flying or not.
-4. **FPV VTX on (2 min).** *Needs a HackRF, or use the simulator (FPV drone power-on / flight
+4. **FPV video on (2 min).** *Needs a HackRF, or use the simulator (FPV drone power-on / flight
    toggles for a DJI O3/O4 quad; see [Drone link signature](#drone-link-signature-counter-uas-segment)).* Switch to **5.8 GHz FPV
-   video** and power the quad. A fat continuous carrier appears at the VTX channel. Lesson:
-   an analog VTX is a 100% duty-cycle beacon. Use pit or low-power mode on the ground, and
-   power the VTX only when airborne.
+   video** and power the quad. A DJI O3/O4 air unit shows as a solid 10–40 MHz digital block
+   (an analog VTX would be a narrower 3–7 MHz carrier). Lesson: the video link transmits the
+   whole time the air unit is powered, even on the ground. Power it only when needed, at the
+   lowest power setting.
 5. **Phones (1 min, optional).** Switch to **Mobile uplink (LTE 800)** and take one phone out
    of flight mode. Uplink bursts appear even when nobody is using the phone.
 6. **Debrief (2 min).** Press **Debrief**. Talk through the emitter list: what an adversary
@@ -164,7 +165,9 @@ With only an RTL-SDR, step 4 can't be shown live. Run that segment with the simu
 the HackRF.
 
 In simulate mode, **Auto demo** runs the same story unattended (quiet → Meshtastic → ELRS →
-VTX on 5.8 → phone on LTE 800 → FPV drone power-on on 2.4 then 5.8 → drone flight → all off), and **Manual** gives you a toggle for each radio.
+433 MHz background → phone on LTE 800 → FPV drone power-on on 2.4 then 5.8 → drone flight → all off), and **Manual** gives you a toggle for each radio.
+The demo drone is DJI O3/O4 **digital**, so Auto demo shows the 10/20 MHz digital block, never
+an analog carrier. The analog VTX is a separate, optional **Manual** toggle.
 
 ## Drone link signature (counter-UAS segment)
 
@@ -183,8 +186,9 @@ decoded:
 - **C2 and video together** raise **"Drone C2 + video link (higher confidence)"** (red banner).
 - Each escalation writes a `drone` event to the log. If `ALERT_MESH` / `ALERT_COT` are on (and
   `ALERT_DRONE=1`, the default), it also sends a `meshbus/tx` text and a CoT **unknown-air**
-  (`a-u-A`) marker at the sensor position, with remarks like *"RF: drone video link 5.8 GHz,
-  bearing unknown"*. Both go through the same rate limits as the other alerts.
+  (`a-u-A`) marker at the sensor position, with remarks like *"RF: drone DJI/digital video link 5.8 GHz
+  + drone control link 2.4 GHz, bearing unknown"*. Both go through the same rate limits as the
+  other alerts. No marker is sent unless `SENSOR_LAT`/`SENSOR_LON` are set.
 - Anything produced from simulated data is labelled **SIMULATED**: in the UI, as a `SIMULATED:`
   prefix in the CoT remarks, and as `[SIM]` in the mesh text.
 - Bluetooth also hops at 2.4 GHz and Wi-Fi also fills 2.4 GHz, which is why one component alone
@@ -235,8 +239,8 @@ Set these in `/etc/rf-spectrum.env`:
 
 | Setting | Effect |
 |---|---|
-| `ALERT_MESH=1` | Publishes `{"text","to","channel","source":"rf-spectrum"}` to `meshbus/tx` on the local MQTT broker (`MQTT_*`). The blufor-tracker bridge sends it over LoRa. We never open the radio's serial port. Rate-limited by `ALERT_MIN_INTERVAL_S`. |
-| `ALERT_COT=1` | Sends a CoT `a-u-G` marker per new emitter to `TAK_HOST:TAK_PORT` (default 127.0.0.1:8087), reconnecting with backoff. The marker sits at `SENSOR_LAT/SENSOR_LON`, the sensor's own position, because energy detection gives no bearing. |
+| `ALERT_MESH=1` | Publishes `{"text","to","channel","source":"rf-spectrum"}` to `meshbus/tx` on the local MQTT broker (`MQTT_*`). The blufor-tracker bridge sends it over LoRa. We never open the radio's serial port. At most one text per `ALERT_MIN_INTERVAL_S` (default 60, never below 30). |
+| `ALERT_COT=1` | Sends a CoT `a-u-G` marker per new emitter to `TAK_HOST:TAK_PORT` (default 127.0.0.1:8087), reconnecting with backoff. The marker sits at `SENSOR_LAT/SENSOR_LON`, the sensor's own position, because energy detection gives no bearing. At most one message per 5 s per marker (the newest is kept). **If `SENSOR_LAT`/`SENSOR_LON` are unset (or 0,0), no CoT is sent** and the log says so once; use the same OP position as the other tools. |
 | `WATCH_BANDS=863-870` | Only NEW emitters in these MHz ranges alert. Baselined emitters never alert. |
 
 **Why off by default:** a mesh alert is itself an 868 MHz LoRa transmission. If you're
@@ -251,9 +255,10 @@ own node first, or watch a different band.
 Every `HEARTBEAT_S` seconds (default 10), rf-spectrum publishes a **retained** JSON message to
 `isrkit/heartbeat/rf-spectrum` on the MQTT broker:
 `{"tool":"rf-spectrum","host":"isr-pi","url":"http://isr-pi.local:8140","mode":"simulate|cpu","status":"ok|degraded|error","ts":…}`.
-`status` is `degraded` when the selected band has no receiver or the SDR errored. On a clean
-shutdown it publishes `"status":"stopped"`. If the broker is down, it logs once and keeps
-running. The MQTT and TAK addresses come from `MQTT_HOST/PORT/USER/PASS` and
+`status` is `degraded` when the selected band has no receiver or the SDR errored. `host` is `ISR_HOST` if set, else the lowercased short hostname. On a clean
+shutdown it publishes `"status":"stopped"`. The heartbeat and mesh alerts share one MQTT
+connection that publishes only while connected; if the broker is down it logs one line, retries
+with backoff (1 s to 60 s) and logs again when it reconnects. The MQTT and TAK addresses come from `MQTT_HOST/PORT/USER/PASS` and
 `TAK_HOST/TAK_PORT`, or from the `--mqtt-host`, `--mqtt-port`, `--mqtt-user`, `--mqtt-pass`,
 `--tak-host` and `--tak-port` flags. They default to localhost, and the web UI binds to
 `0.0.0.0`.

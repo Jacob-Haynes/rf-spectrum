@@ -11,8 +11,9 @@ from pathlib import Path
 
 import numpy as np
 
-from rfspectrum.alerts.cot import CotClient, build_drone_cot, build_emitter_cot
+from rfspectrum.alerts.cot import DRONE_UID, CotClient, build_drone_cot, build_emitter_cot, emitter_uid
 from rfspectrum.alerts.heartbeat import Heartbeat
+from rfspectrum.alerts.mqttbus import MqttBus
 from rfspectrum.alerts.mesh import MeshPublisher, drone_alert_text, emitter_alert_text
 from rfspectrum.bands import PRESETS, get_preset
 from rfspectrum.config import Settings
@@ -111,19 +112,23 @@ class Runtime:
             logger.warning("Cannot use data dir %s (%s); event log not persisted", self.data_dir, e)
             self._event_log = None
 
+        # One MQTT connection for heartbeat + mesh; only connects if one of them is on.
+        self.bus = MqttBus(settings.mqtt_host, settings.mqtt_port, settings.mqtt_user, settings.mqtt_pass)
         self.mesh = (
             MeshPublisher(
-                settings.mqtt_host, settings.mqtt_port, settings.mqtt_user, settings.mqtt_pass,
-                to=settings.mesh_to, channel=settings.mesh_channel,
+                self.bus, to=settings.mesh_to, channel=settings.mesh_channel,
                 min_interval_s=settings.alert_min_interval_s,
             )
             if settings.alert_mesh
             else None
         )
+        self.has_position = settings.sensor_lat is not None and settings.sensor_lon is not None
         self.cot = CotClient(settings.tak_host, settings.tak_port) if settings.alert_cot else None
+        if self.cot and not self.has_position:
+            logger.warning("ALERT_COT=1 but SENSOR_LAT/SENSOR_LON are not set: no CoT markers will be "
+                           "sent (energy detection has no position of its own, and 0,0 is never used)")
         self.heartbeat = Heartbeat(
-            self.health, settings.port, settings.mqtt_host, settings.mqtt_port,
-            settings.mqtt_user, settings.mqtt_pass, interval_s=settings.heartbeat_s,
+            self.health, settings.port, self.bus, interval_s=settings.heartbeat_s,
             public_url=settings.public_url,
         )
 
@@ -157,6 +162,7 @@ class Runtime:
             src.close()
         if self.cot:
             self.cot.close()
+        self.bus.stop()
 
     # ------------------------------------------------------------ control
 
@@ -296,8 +302,9 @@ class Runtime:
         if ev["type"] == "drone" and ev.get("escalation") and self.settings.alert_drone:
             if self.mesh:
                 self.mesh.send(drone_alert_text(ev, self.simulated))
-            if self.cot:
-                self.cot.send(build_drone_cot(ev, self.settings.sensor_lat, self.settings.sensor_lon, self.simulated))
+            if self.cot and self.has_position:
+                self.cot.send(build_drone_cot(ev, self.settings.sensor_lat, self.settings.sensor_lon,
+                                              self.simulated), uid=DRONE_UID)
         return ev
 
     def _on_event(self, ev: dict, em: Emitter) -> None:
@@ -312,9 +319,10 @@ class Runtime:
         }
         if self.mesh:
             self.mesh.send(emitter_alert_text(info, self.simulated))
-        if self.cot:
+        if self.cot and self.has_position:
             self.cot.send(build_emitter_cot(
-                info, self.settings.sensor_lat, self.settings.sensor_lon, simulated=self.simulated))
+                info, self.settings.sensor_lat, self.settings.sensor_lon, simulated=self.simulated),
+                uid=emitter_uid(info))
 
     # ------------------------------------------------------------ status
 
@@ -345,6 +353,7 @@ class Runtime:
                 "watch_bands_mhz": [[lo / 1e6, hi / 1e6] for lo, hi in self.settings.watch_bands],
                 "tak": f"{self.settings.tak_host}:{self.settings.tak_port}",
                 "cot_connected": bool(self.cot and self.cot.connected),
+                "sensor_position": self.has_position,
             },
             "rules": [r.to_dict() for r in self.rules],
         }

@@ -166,7 +166,7 @@ class Elrs2g4(Hopper):
 
 
 class Vtx(SimEmitter):
-    id, label, group = "vtx", "FPV analog VTX (5.8 GHz)", "own"
+    id, label, group = "vtx", "Analog FPV VTX 5.8 GHz (optional)", "own"
     fc = 5800 * MHZ  # Fatshark/F4
     lo_hz, hi_hz = fc - 10 * MHZ, fc + 10 * MHZ
 
@@ -223,7 +223,7 @@ class FpvDronePower(SimEmitter):
     Video: persistent OFDM-like block, 10 MHz wide at low power on the ground.
     """
 
-    id, label, group = "drone_power", "FPV drone power-on (ELRS 2.4 + O4 idle)", "own"
+    id, label, group = "drone_power", "FPV drone power-on (ELRS 2.4 + DJI O4 digital idle)", "own"
     lo_hz, hi_hz = 2400 * MHZ, 5850 * MHZ
     video_fc, video_bw, video_snr, fade_db = 5795 * MHZ, 10 * MHZ, 24.0, 1.0
 
@@ -249,7 +249,7 @@ class FpvDronePower(SimEmitter):
 class FpvDroneFlight(FpvDronePower):
     """Airborne: video at full bandwidth/power with fading as the quad manoeuvres."""
 
-    id, label = "drone_flight", "FPV drone flight (ELRS 2.4 + O4 20 MHz)"
+    id, label = "drone_flight", "FPV drone flight (ELRS 2.4 + DJI O4 digital 20 MHz)"
     video_bw, video_snr, fade_db = 20 * MHZ, 36.0, 4.0
 
 
@@ -304,8 +304,9 @@ AUTO_SCENARIO = (
     (0, {"preset": "868", "own": []}),
     (25, {"own": ["meshtastic"]}),
     (55, {"own": ["meshtastic", "elrs868"]}),
-    (90, {"preset": "5g8", "own": ["meshtastic", "elrs868", "vtx"]}),
-    (115, {"preset": "lte800", "own": ["meshtastic", "elrs868", "vtx", "phone"]}),
+    # The analog VTX is a manual toggle only: the demo drone is DJI O3/O4 digital.
+    (90, {"preset": "433", "own": ["meshtastic", "elrs868"]}),
+    (115, {"preset": "lte800", "own": ["meshtastic", "elrs868", "phone"]}),
     # Drone threat segment: power-on on the 2.4 GHz band, video on 5.8, then flight.
     (140, {"preset": "2g4", "own": ["drone_power"]}),
     (160, {"preset": "5g8", "own": ["drone_power"]}),

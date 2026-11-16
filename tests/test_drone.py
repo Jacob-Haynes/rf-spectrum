@@ -75,14 +75,14 @@ def test_baselined_emitters_ignored():
 
 def test_alert_texts_are_labelled_simulated():
     ev = {"type": "drone", "name": "Possible drone C2/video link", "confidence": "possible",
-          "components": [{"short": "drone video link 5.8 GHz"}]}
+          "components": [{"short": "drone DJI/digital video link 5.8 GHz"}]}
     txt = drone_alert_text(ev, simulated=True)
-    assert txt.startswith("[SIM] ") and "drone video link 5.8 GHz" in txt and len(txt) < 200
+    assert txt.startswith("[SIM] ") and "drone DJI/digital video link 5.8 GHz" in txt and len(txt) < 200
     assert not drone_alert_text(ev).startswith("[SIM]")
     root = ET.fromstring(build_drone_cot(ev, 51.1, -1.7, simulated=True))
     assert root.get("type") == "a-u-A"
     remarks = root.find("detail/remarks").text
-    assert remarks.startswith("SIMULATED: RF: drone video link 5.8 GHz, bearing unknown")
+    assert remarks.startswith("SIMULATED: RF: drone DJI/digital video link 5.8 GHz, bearing unknown")
 
 
 def test_drone_alerts_use_mesh_and_cot_plumbing(tmp_path, monkeypatch):
@@ -100,3 +100,63 @@ def test_drone_alerts_use_mesh_and_cot_plumbing(tmp_path, monkeypatch):
 def test_auto_scenario_includes_drone_segment():
     owns = [a.get("own", []) for _, a in AUTO_SCENARIO]
     assert any("drone_power" in o for o in owns) and any("drone_flight" in o for o in owns)
+
+
+def test_auto_scenario_never_uses_analog_vtx():
+    assert not any("vtx" in a.get("own", []) for _, a in AUTO_SCENARIO)
+
+
+def test_auto_demo_drone_escalation_is_dji_digital(tmp_path):
+    """RF-3: the Auto demo's drone segment must report the DJI/digital block, not an analog VTX."""
+    rt = _rt(tmp_path, sim_background=True)
+    rt.sim.set_scenario("auto", 0.0)
+    t, preset = 0.0, "868"
+    while t < 225:
+        want = rt.sim.scenario_tick(t)
+        if want and want != preset:
+            rt.set_preset(want)
+            preset = want
+        rt.handle_frame(Frame(t, preset, rt.sim.render(preset, t)))
+        t += 0.1
+    drones = [e for e in rt.engine.events if e["type"] == "drone"]
+    high = [e for e in drones if e["confidence"] == "high"]
+    assert high, [e["name"] for e in drones]
+    for ev in drones:
+        rules = {c["rule_id"] for c in ev["components"]}
+        assert "vtx_5g8" not in rules
+    assert any("dji_video_5g8" in {c["rule_id"] for c in e["components"]} for e in high)
+    assert "DJI/digital" in drone_alert_text(high[-1], simulated=True)
+
+
+def test_dji_block_suppresses_stale_analog_component():
+    det = DroneLinkDetector()
+    base = {"active": True, "baseline": False, "duty": 0.99, "bw_khz": 0}
+    ems = [dict(base, rule_id="vtx_5g8", freq_mhz=5800), dict(base, rule_id="dji_video_5g8", freq_mhz=5795),
+           dict(base, rule_id="hopper_2g4", freq_mhz=2440, duty=0.5)]
+    ev = det.evaluate(ems, 0)
+    assert ev["confidence"] == "high"
+    assert [c["rule_id"] for c in ev["components"]] == ["hopper_2g4", "dji_video_5g8"]
+
+
+def test_no_cot_without_sensor_position(tmp_path, monkeypatch):
+    rt = _rt(tmp_path, sim_background=False, alert_cot=True)
+    assert rt.has_position is False
+    sent = []
+    monkeypatch.setattr(rt.cot, "send", lambda xml, uid=None: sent.append(xml))
+    rt.sim.set_emitter("drone_flight", True, 1000.0)
+    t = _run(rt, "2g4", 15, 1000.0)
+    _run(rt, "5g8", 15, t)
+    assert rt.drone.level == "high" and sent == []  # never a 0,0 marker
+    rt.cot.close()
+
+
+def test_cot_at_sensor_position_when_set(tmp_path, monkeypatch):
+    rt = _rt(tmp_path, sim_background=False, alert_cot=True, sensor_lat=51.1789, sensor_lon=-1.8262)
+    sent = []
+    monkeypatch.setattr(rt.cot, "send", lambda xml, uid=None: sent.append((uid, xml)))
+    rt.sim.set_emitter("drone_flight", True, 1000.0)
+    t = _run(rt, "2g4", 15, 1000.0)
+    _run(rt, "5g8", 15, t)
+    drone = [x for u, x in sent if u == "RFSPEC-DRONE"]
+    assert drone and 'lat="51.178900"' in drone[-1] and "SIMULATED: " in drone[-1]
+    rt.cot.close()

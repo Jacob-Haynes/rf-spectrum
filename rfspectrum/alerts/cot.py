@@ -18,6 +18,7 @@ from xml.sax.saxutils import escape, quoteattr
 logger = logging.getLogger(__name__)
 
 STALE_S = 300
+MIN_UID_INTERVAL_S = 5.0  # contract C4.4: at most one CoT per 5 s per uid
 
 
 def _iso(ts: float) -> str:
@@ -39,7 +40,7 @@ def build_drone_cot(
     callsign = ("SIM " if simulated else "") + "RF drone link"
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        f'<event version="2.0" uid="RFSPEC-DRONE" type="a-u-A" how="m-g"'
+        f'<event version="2.0" uid="{DRONE_UID}" type="a-u-A" how="m-g"'
         f' time="{_iso(now)}" start="{_iso(now)}" stale="{_iso(now + STALE_S)}">'
         f'<point lat="{lat:.6f}" lon="{lon:.6f}" hae="0" ce="2000" le="9999999"/>'
         "<detail>"
@@ -49,12 +50,19 @@ def build_drone_cot(
     )
 
 
+DRONE_UID = "RFSPEC-DRONE"
+
+
+def emitter_uid(emitter: dict, uid_prefix: str = "RFSPEC") -> str:
+    return f"{uid_prefix}-{emitter['key'].replace(':', '-')}"
+
+
 def build_emitter_cot(
     emitter: dict, lat: float, lon: float, now: float | None = None, uid_prefix: str = "RFSPEC",
     simulated: bool = False,
 ) -> str:
     now = time.time() if now is None else now
-    uid = f"{uid_prefix}-{emitter['key'].replace(':', '-')}"
+    uid = emitter_uid(emitter, uid_prefix)
     callsign = ("SIM " if simulated else "") + f"RF {emitter['freq_mhz']:.3f}"
     remarks = (
         ("SIMULATED: " if simulated else "")
@@ -77,8 +85,15 @@ def build_emitter_cot(
 class CotClient:
     """Non-blocking sender: queue + background thread, never raises to callers."""
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 8087, max_backoff_s: float = 60.0):
+    def __init__(
+        self, host: str = "127.0.0.1", port: int = 8087, max_backoff_s: float = 60.0,
+        min_uid_interval_s: float = MIN_UID_INTERVAL_S,
+    ):
         self.host, self.port = host, port
+        self.min_uid_interval_s = min_uid_interval_s
+        self._last_uid: dict[str, float] = {}
+        self._pending: dict[str, str] = {}  # uid -> newest throttled message
+        self._plock = threading.Lock()
         self.max_backoff_s = max_backoff_s
         self._q: queue.Queue[str] = queue.Queue(maxsize=200)
         self._sock: socket.socket | None = None
@@ -89,7 +104,29 @@ class CotClient:
         self._thread.start()
         self.connected = False
 
-    def send(self, xml: str) -> None:
+    def send(self, xml: str, uid: str | None = None) -> None:
+        """Queue a CoT event. Within 5 s of the last one for this uid, keep only the
+        newest and send it when the window opens (so an escalation is never lost)."""
+        if uid:
+            with self._plock:
+                if time.time() - self._last_uid.get(uid, 0.0) < self.min_uid_interval_s:
+                    self._pending[uid] = xml
+                    return
+                self._last_uid[uid] = time.time()
+        self._enqueue(xml)
+
+    def _flush_pending(self) -> None:
+        now = time.time()
+        with self._plock:
+            due = [u for u in self._pending if now - self._last_uid.get(u, 0.0) >= self.min_uid_interval_s]
+            msgs = []
+            for u in due:
+                msgs.append(self._pending.pop(u))
+                self._last_uid[u] = now
+        for m in msgs:
+            self._enqueue(m)
+
+    def _enqueue(self, xml: str) -> None:
         try:
             self._q.put_nowait(xml)
         except queue.Full:
@@ -124,6 +161,7 @@ class CotClient:
 
     def _run(self) -> None:
         while not self._stop.is_set():
+            self._flush_pending()
             try:
                 xml = self._q.get(timeout=0.5)
             except queue.Empty:

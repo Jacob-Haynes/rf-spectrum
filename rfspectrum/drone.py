@@ -17,8 +17,8 @@ from __future__ import annotations
 # rule_id: (UI label, short alert text, minimum duty cycle)
 C2_RULES = {"hopper_2g4": ("ELRS-style 2.4 GHz hopping control link", "drone control link 2.4 GHz", 0.15)}
 VIDEO_RULES = {
-    "dji_video_5g8": ("digital video link 5.8 GHz (DJI O3/O4-style)", "drone video link 5.8 GHz", 0.5),
-    "vtx_5g8": ("analog video link 5.8 GHz", "drone video link 5.8 GHz", 0.5),
+    "dji_video_5g8": ("DJI/digital video link 5.8 GHz (O3/O4-style)", "drone DJI/digital video link 5.8 GHz", 0.5),
+    "vtx_5g8": ("analog video link 5.8 GHz", "drone analog video link 5.8 GHz", 0.5),
     "wifi_2g4": ("possible video link 2.4 GHz (or busy Wi-Fi)", "possible drone video link 2.4 GHz", 0.9),
 }
 LEVELS = {"none": 0, "possible": 1, "high": 2}
@@ -45,6 +45,10 @@ class DroneLinkDetector:
         """Returns an event dict when the confidence level changes, else None."""
         c2 = self._match(emitters, C2_RULES)
         video = self._match(emitters, VIDEO_RULES)
+        if any(v["rule_id"] == "dji_video_5g8" for v in video):
+            # a digital block explains the 5.8 GHz energy; don't also report a stale analog VTX
+            video = [v for v in video if v["rule_id"] != "vtx_5g8"]
+        video.sort(key=lambda v: list(VIDEO_RULES).index(v["rule_id"]))
         level = "high" if c2 and video else "possible" if (c2 or video) else "none"
         self.components = c2 + video
         if level == self.level:
@@ -74,7 +78,7 @@ class DroneLinkDetector:
 
 
 def describe(ev: dict) -> str:
-    """Short alert text, e.g. 'drone video link 5.8 GHz + drone control link 2.4 GHz'."""
+    """Short alert text, e.g. 'drone DJI/digital video link 5.8 GHz + drone control link 2.4 GHz'."""
     seen: list[str] = []
     for c in ev.get("components", []):
         if c["short"] not in seen:

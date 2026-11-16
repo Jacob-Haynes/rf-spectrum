@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
+
+from rfspectrum.alerts.mqttbus import MqttBus
 
 logger = logging.getLogger(__name__)
 
@@ -43,45 +44,36 @@ def emitter_alert_text(emitter: dict, simulated: bool = False) -> str:
     )
 
 
+MIN_INTERVAL_S = 30.0  # contract C4.4: at most one mesh text per 30 s per tool
+
+
 class MeshPublisher:
     def __init__(
         self,
-        host: str = "127.0.0.1",
-        port: int = 1883,
-        username: str = "guest",
-        password: str = "guest",
+        bus: MqttBus,
         topic: str = "meshbus/tx",
         to: str | None = None,
         channel: int = 0,
         min_interval_s: float = 60.0,
     ):
-        self.host, self.port = host, port
-        self.auth = {"username": username, "password": password}
+        self.bus = bus
         self.topic, self.to, self.channel = topic, to, channel
-        self.min_interval_s = min_interval_s
+        self.min_interval_s = max(MIN_INTERVAL_S, min_interval_s)
         self._last = 0.0
         self._lock = threading.Lock()
+        bus.start()
 
     def send(self, text: str) -> bool:
-        """Queue a text for the mesh. Returns False if rate-limited."""
+        """Publish a text for the mesh. Returns False if rate-limited or the broker is down."""
         with self._lock:
             now = time.time()
             if now - self._last < self.min_interval_s:
                 logger.info("mesh alert rate-limited: %s", text)
                 return False
+            payload = build_mesh_payload(text, self.to, self.channel)
+            if not self.bus.publish(self.topic, payload):
+                logger.info("mesh alert not sent (MQTT not connected): %s", text)
+                return False
             self._last = now
-        payload = build_mesh_payload(text, self.to, self.channel)
-        threading.Thread(target=self._publish, args=(payload,), daemon=True).start()
+        logger.info("mesh alert published to %s", self.topic)
         return True
-
-    def _publish(self, payload: str) -> None:
-        try:
-            import paho.mqtt.publish as publish
-
-            publish.single(
-                self.topic, payload, qos=0, hostname=self.host, port=self.port,
-                auth=self.auth, client_id=f"rf-spectrum-{os.getpid()}", keepalive=10,
-            )
-            logger.info("mesh alert published to %s", self.topic)
-        except Exception as e:  # broker down, auth, etc.: log and carry on
-            logger.warning("MQTT broker %s:%d unavailable, mesh alert not sent: %s", self.host, self.port, e)
