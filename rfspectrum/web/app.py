@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
 from rfspectrum.bands import PRESETS
@@ -58,6 +58,15 @@ def create_app(runtime: Runtime) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index():
         return (STATIC_DIR / "index.html").read_text()
+
+    # Shared ISR kit look, vendored unchanged from ui-kit/.
+    @app.get("/isr-ui.css", include_in_schema=False)
+    async def isr_ui_css():
+        return FileResponse(STATIC_DIR / "isr-ui.css", media_type="text/css")
+
+    @app.get("/isr-ui.js", include_in_schema=False)
+    async def isr_ui_js():
+        return FileResponse(STATIC_DIR / "isr-ui.js", media_type="text/javascript")
 
     @app.get("/api/status")
     async def status():

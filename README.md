@@ -35,7 +35,7 @@ uv venv -p 3.11 .venv && uv pip install -p .venv/bin/python -r requirements-dev.
 .venv/bin/python -m rfspectrum --simulate
 ```
 
-Open <http://localhost:8140>. The **Auto demo** scenario plays the full lesson by itself, or
+Open <http://localhost:8140>. **Run auto demo** plays the full lesson by itself, or
 press **Manual** and switch each simulated radio on yourself. Run the tests with:
 
 ```bash
@@ -133,7 +133,7 @@ receiver, VTX/quad battery, and phones in flight mode. Select **868 MHz SRD / Lo
 1. **Quiet waterfall (1 min).** Show the noise floor (dashed blue) and the detection threshold
    (dashed red). Point out the allocation strip: g1 868.0–868.6 (1% duty), g3 869.4–869.65
    (10%, Meshtastic default). If anything civilian shows up, such as an alarm sensor or a smart
-   meter, discuss it, then press **Set RF baseline**. That's a real EMCON practice: survey
+   meter, discuss it, then press **Set baseline**. That's a real EMCON practice: survey
    the environment before you switch on, so you know what's yours.
    *EMCON score: 100 SILENT.*
 2. **Meshtastic node on (2 min).** Power the Heltec V3 and send a message. A 250 kHz block
@@ -157,14 +157,14 @@ receiver, VTX/quad battery, and phones in flight mode. Select **868 MHz SRD / Lo
    with the same £35 receiver and a directional antenna would know. Then switch everything off
    again and watch the score recover.
 
-**Auto-scan** cycles through every band the attached receivers can tune, so one SDR can watch
+**Scan all bands** cycles through every band the attached receivers can tune, so one SDR can watch
 the lot. Emitters in a band you aren't currently watching keep their last-known state until
 that band is checked again.
 
 With only an RTL-SDR, step 4 can't be shown live. Run that segment with the simulator, or buy
 the HackRF.
 
-In simulate mode, **Auto demo** runs the same story unattended (quiet → Meshtastic → ELRS →
+In simulate mode, **Run auto demo** plays the same story unattended (quiet → Meshtastic → ELRS →
 433 MHz background → phone on LTE 800 → FPV drone power-on on 2.4 then 5.8 → drone flight → all off), and **Manual** gives you a toggle for each radio.
 The demo drone is DJI O3/O4 **digital**, so Auto demo shows the 10/20 MHz digital block, never
 an analog carrier. The analog VTX is a separate, optional **Manual** toggle.
@@ -192,14 +192,14 @@ decoded:
 - Anything produced from simulated data is labelled **SIMULATED**: in the UI, as a `SIMULATED:`
   prefix in the CoT remarks, and as `[SIM]` in the mesh text.
 - Bluetooth also hops at 2.4 GHz and Wi-Fi also fills 2.4 GHz, which is why one component alone
-  is only "possible". Press **Set RF baseline** before the drone powers up.
+  is only "possible". Press **Set baseline** before the drone powers up.
 
 **Hardware reality.** An RTL-SDR tops out near 1.7 GHz, so it **cannot see 2.4 or 5.8 GHz**.
 Detecting this drone live needs a **HackRF One**, or another receiver that reaches 6 GHz,
-through the existing `hackrf_sweep` backend. One HackRF covers both bands with **Auto-scan**,
+through the existing `hackrf_sweep` backend. One HackRF covers both bands with **Scan all bands**,
 because each band keeps its last-known state while the other is being swept. Without one, run
 this segment in simulate mode: the **FPV drone power-on** and **FPV drone flight** toggles
-(also part of **Auto demo**) generate ELRS 2.4 hopping and an O4-style 10/20 MHz video block.
+(also part of **Run auto demo**) generate ELRS 2.4 hopping and an O4-style 10/20 MHz video block.
 Switching either one on (in the UI or with `POST /api/sim/emitter`) starts **Drone watch**: the
 sweep alternates between 2.4 GHz and 5.8 GHz every `DRONE_WATCH_DWELL_S` seconds (default 8), so
 both halves of the link are seen whatever band was selected. Picking a band yourself, or

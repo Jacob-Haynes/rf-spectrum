@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 import pytest
@@ -20,7 +21,7 @@ def client(tmp_path):
 def test_index_and_status(client):
     c, _ = client
     r = c.get("/")
-    assert r.status_code == 200 and "RECEIVE ONLY" in r.text
+    assert r.status_code == 200 and "Receive only" in r.text
     st = c.get("/api/status").json()
     assert st["mode"] == "simulated"
     assert st["gemini"]["enabled"] is False
@@ -123,3 +124,23 @@ def test_drone_demo_profile_defaults_cot_on(monkeypatch):
     monkeypatch.delenv("RFSPEC_DEMO")
     monkeypatch.delenv("ALERT_COT")
     assert Settings.from_env().alert_cot is False
+
+
+# sha256 of ui-kit/isr-ui.css and isr-ui.js v1: the served copies must be the kit, unchanged.
+KIT_SHA256 = {
+    "isr-ui.css": "4e19df9824145ead677fc30dfa28eb802294151ee16e3c4046545c6d9ce89666",
+    "isr-ui.js": "a0b67a8409914a0376be7e2f51d7d4cca0fd86f7ab7ea25f048aa855cb9b1fb9",
+}
+
+
+def test_page_uses_isr_ui_kit(client):
+    c, _ = client
+    html = c.get("/").text
+    assert '<link rel="stylesheet" href="isr-ui.css">' in html
+    assert '<script src="isr-ui.js"></script>' in html
+    assert 'id="isr-status"' in html and 'id="isr-kit-link"' in html and "<h1>RF spectrum</h1>" in html
+    for name, sha in KIT_SHA256.items():
+        r = c.get("/" + name)
+        assert r.status_code == 200
+        assert hashlib.sha256(r.content).hexdigest() == sha, f"{name} differs from the ISR kit copy"
+    assert c.get("/isr-ui.css").headers["content-type"].startswith("text/css")
