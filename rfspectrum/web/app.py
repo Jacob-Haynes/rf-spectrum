@@ -68,6 +68,16 @@ def create_app(runtime: Runtime) -> FastAPI:
     async def isr_ui_js():
         return FileResponse(STATIC_DIR / "isr-ui.js", media_type="text/javascript")
 
+    KIT_FONTS = {f.name: f for f in (STATIC_DIR / "fonts").iterdir()} if (STATIC_DIR / "fonts").is_dir() else {}
+
+    @app.get("/fonts/{name}", include_in_schema=False)
+    async def isr_ui_font(name: str):
+        f = KIT_FONTS.get(name)  # only the vendored kit files, never a path from the request
+        if f is None:
+            raise HTTPException(404, "not found")
+        kind = "font/woff2" if name.endswith(".woff2") else "text/plain; charset=utf-8"
+        return FileResponse(f, media_type=kind, headers={"Cache-Control": "public, max-age=86400"})
+
     @app.get("/api/status")
     async def status():
         return runtime.status()
