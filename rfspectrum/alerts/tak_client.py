@@ -132,6 +132,16 @@ class TakClient:
             self._push(xml)
         self._wake.set()
 
+    def discard_pending(self, uid: str) -> None:
+        """Forget a throttled message for uid, so it can't go out after a deletion."""
+        with self._qlock:
+            self._pending.pop(uid, None)
+
+    def resend_sa(self) -> None:
+        """Re-send the registration SA soon (OTS marks us disconnected after a t-x-d-d)."""
+        self._last_sa = 0.0
+        self._wake.set()
+
     def close(self) -> None:
         self._stop.set()
         self._wake.set()

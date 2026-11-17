@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from rfspectrum.bands import PRESETS
 from rfspectrum.debrief import build_summary, debrief
+from rfspectrum.demo import DemoUnavailable
 from rfspectrum.runtime import DRONE_EMITTERS, Runtime
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,11 @@ class SimEmitterIn(BaseModel):
 
 class ScenarioIn(BaseModel):
     scenario: str
+
+
+class DemoTriggerIn(BaseModel):
+    model_config = {"extra": "allow"}  # contract: tools ignore options they don't use
+    id: str
 
 
 class BaselineIn(BaseModel):
@@ -147,8 +153,31 @@ def create_app(runtime: Runtime) -> FastAPI:
             raise HTTPException(409, "not in simulate mode")
         if body.scenario not in ("auto", "manual"):
             raise HTTPException(400, "scenario must be auto or manual")
+        if body.scenario == "auto" and runtime.demo_mode == "on_demand":
+            raise HTTPException(409, "Auto demo is off in step-by-step mode; use the Demo scenarios")
         runtime.sim.set_scenario(body.scenario, time.time())
         return runtime.sim.state()
+
+    # ---- demo trigger contract v6
+    @app.get("/api/demo/scenarios")
+    async def demo_scenarios():
+        st = runtime.demo_state()
+        return {"mode": st["mode"], "scenarios": st["scenarios"], "active": st["active"],
+                "available": st["available"], "until": st["until"]}
+
+    @app.post("/api/demo/trigger")
+    async def demo_trigger(body: DemoTriggerIn):
+        try:
+            until = runtime.demo_trigger(body.id)
+        except KeyError:
+            raise HTTPException(404, f"unknown demo scenario {body.id}") from None
+        except DemoUnavailable as e:
+            raise HTTPException(409, str(e)) from None
+        return {"ok": True, "id": body.id, "until": until}
+
+    @app.post("/api/demo/clear")
+    async def demo_clear():
+        return {"ok": True, "cleared": runtime.demo_clear()}
 
     @app.post("/api/debrief")
     def make_debrief():  # sync: runs in a worker thread (Gemini call may block)

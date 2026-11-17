@@ -22,9 +22,11 @@ def short_hostname() -> str:
     return (socket.gethostname().split(".")[0] or "localhost").lower()
 
 
-def build_heartbeat(mode: str, status: str, port: int, public_url: str = "", now: float | None = None) -> dict:
+def build_heartbeat(
+    mode: str, status: str, port: int, public_url: str = "", now: float | None = None, detail: dict | None = None,
+) -> dict:
     host = short_hostname()
-    return {
+    hb = {
         "tool": "rf-spectrum",
         "host": host,
         "url": public_url or f"http://{host}.local:{port}",
@@ -32,6 +34,9 @@ def build_heartbeat(mode: str, status: str, port: int, public_url: str = "", now
         "status": status,  # ok | degraded | error | stopped
         "ts": int(time.time() if now is None else now),
     }
+    if detail is not None:
+        hb["detail"] = detail  # contract v6: demo_mode, demo_active
+    return hb
 
 
 class Heartbeat:
@@ -42,8 +47,10 @@ class Heartbeat:
         bus: MqttBus | None = None,
         interval_s: float = 10.0,
         public_url: str = "",
+        detail: Callable[[], dict] | None = None,
     ):
         self.state = state
+        self.detail = detail
         self.port, self.public_url = port, public_url
         self.bus = bus
         self.interval_s = interval_s
@@ -70,7 +77,8 @@ class Heartbeat:
         self.bus.wait_connected(3.0)  # first beat as soon as the broker answers
         while not self._stop.is_set():
             mode, status = self.state()
-            self._publish(build_heartbeat(mode, status, self.port, self.public_url))
+            self._publish(build_heartbeat(mode, status, self.port, self.public_url,
+                                          detail=self.detail() if self.detail else None))
             self._stop.wait(self.interval_s)
 
     def _publish(self, payload: dict, wait_s: float = 0.0) -> bool:

@@ -8,22 +8,27 @@ import logging
 import threading
 import time
 from pathlib import Path
+from typing import Callable
 
 import numpy as np
 
 from rfspectrum import __version__
-from rfspectrum.alerts.cot import DRONE_UID, build_drone_cot, build_emitter_cot, emitter_uid
+from rfspectrum.alerts.cot import (
+    DRONE_TYPE, DRONE_UID, EMITTER_TYPE, STALE_S, build_delete_cot, build_drone_cot, build_emitter_cot,
+    emitter_uid,
+)
 from rfspectrum.alerts.heartbeat import Heartbeat, short_hostname
 from rfspectrum.alerts.mqttbus import MqttBus
 from rfspectrum.alerts.tak_client import TakClient
 from rfspectrum.alerts.mesh import MeshPublisher, drone_alert_text, emitter_alert_text
 from rfspectrum.bands import PRESETS, get_preset
 from rfspectrum.config import Settings
+from rfspectrum.demo import SCENARIOS, DemoUnavailable
 from rfspectrum.drone import DroneLinkDetector
 from rfspectrum.engine import Emitter, Engine
 from rfspectrum.frame import Frame
 from rfspectrum.rules import load_rules
-from rfspectrum.simulator import SimulatedEnvironment
+from rfspectrum.simulator import EXCLUSIVE, SimulatedEnvironment
 from rfspectrum.sources import Source, detect_hardware, pick_source
 from rfspectrum.sources.rtlsdr import RtlSdrSource
 from rfspectrum.sources.simulated import SimulatedSource
@@ -82,6 +87,17 @@ class Runtime:
             self.sources = build_sources(settings, self.sim)
         if settings.backend != "sim":
             self.sim = None
+        self.demo_mode = settings.demo_mode
+        if self.sim is not None and self.demo_mode == "on_demand":
+            # Step by step: no Auto demo and no background emitters until the presenter fires one.
+            self.sim.scenario = "manual"
+            for em in self.sim.emitters.values():
+                em.set_enabled(False, 0.0)
+        self._demo: dict[str, float] = {}  # scenario id -> until (epoch)
+        self._demo_lock = threading.RLock()
+        self._demo_keys_before: set[str] | None = None  # engine emitters heard before the first scenario
+        self._demo_drone_watch = False
+        self._demo_cot: dict[str, tuple[str, Callable[..., str | None]]] = {}  # uid -> (type, builder)
         self.engine = Engine(
             rules=self.rules,
             threshold_db=settings.threshold_db,
@@ -142,6 +158,7 @@ class Runtime:
         self.heartbeat = Heartbeat(
             self.health, settings.port, self.bus, interval_s=settings.heartbeat_s,
             public_url=settings.public_url,
+            detail=lambda: {"demo_mode": self.demo_mode, "demo_active": self.demo_active()},
         )
 
     # ------------------------------------------------------------ lifecycle
@@ -237,6 +254,7 @@ class Runtime:
                 for frame in src.frames(preset, lambda: self._retune.is_set() or self._stop.is_set()):
                     self.handle_frame(frame)
                     if self.sim is not None:
+                        self.demo_tick()
                         want = self.sim.scenario_tick(frame.ts)
                         if want and want != self.preset_id:
                             self.set_preset(want)
@@ -330,10 +348,14 @@ class Runtime:
             if self.mesh:
                 self.mesh.send(drone_alert_text(ev, self.simulated))
             if self.cot and self.has_position:
-                xml = build_drone_cot(ev, self.settings.sensor_lat, self.settings.sensor_lon, self.simulated,
-                                      parent_uid=self.cot.uid, parent_callsign=self.cot.callsign)
+                def make(now=None, stale_s=STALE_S, ev=ev):
+                    return build_drone_cot(ev, self.settings.sensor_lat, self.settings.sensor_lon, self.simulated,
+                                           now=now, parent_uid=self.cot.uid, parent_callsign=self.cot.callsign,
+                                           stale_s=stale_s)
+                xml = make()
                 if xml:
                     self.cot.send(xml, uid=DRONE_UID)
+                    self._note_demo_cot(DRONE_UID, DRONE_TYPE, make)
         return ev
 
     def _on_event(self, ev: dict, em: Emitter) -> None:
@@ -349,11 +371,108 @@ class Runtime:
         if self.mesh:
             self.mesh.send(emitter_alert_text(info, self.simulated))
         if self.cot and self.has_position:
-            xml = build_emitter_cot(info, self.settings.sensor_lat, self.settings.sensor_lon,
-                                    simulated=self.simulated, parent_uid=self.cot.uid,
-                                    parent_callsign=self.cot.callsign)
+            def make(now=None, stale_s=STALE_S, info=info):
+                return build_emitter_cot(info, self.settings.sensor_lat, self.settings.sensor_lon, now=now,
+                                         simulated=self.simulated, parent_uid=self.cot.uid,
+                                         parent_callsign=self.cot.callsign, stale_s=stale_s)
+            xml = make()
             if xml:
                 self.cot.send(xml, uid=emitter_uid(info))
+                self._note_demo_cot(emitter_uid(info), EMITTER_TYPE, make)
+
+    # ------------------------------------------------------------ demo (contract v6)
+
+    def _note_demo_cot(self, uid: str, cot_type: str, make: Callable[..., str | None]) -> None:
+        """Remember simulated markers a demo scenario caused, so Clear demo can remove them."""
+        if self.simulated and (self._demo or self.demo_mode == "on_demand"):
+            self._demo_cot[uid] = (cot_type, make)
+
+    def demo_active(self) -> list[str]:
+        with self._demo_lock:
+            return sorted(self._demo)
+
+    def demo_state(self) -> dict:
+        self.demo_tick()
+        with self._demo_lock:
+            return {
+                "mode": self.demo_mode,
+                "available": self.sim is not None,
+                "scenarios": [sc.to_dict() for sc in SCENARIOS.values()] if self.sim is not None else [],
+                "active": sorted(self._demo),
+                "until": dict(self._demo),
+            }
+
+    def demo_trigger(self, scenario_id: str, now: float | None = None) -> float:
+        """Start one scenario (both modes; in continuous mode it adds to what's running)."""
+        if self.sim is None:
+            raise DemoUnavailable("a real SDR is attached; demo scenarios run in simulate mode only")
+        sc = SCENARIOS[scenario_id]  # KeyError -> 404
+        now = time.time() if now is None else now
+        with self._demo_lock:
+            if self.sim.scenario == "auto":
+                self.sim.scenario = "manual"  # the presenter has taken over; what's on stays on
+            if not self._demo:
+                self._demo_keys_before = {e["key"] for e in self.engine.get_emitters(now)}
+            rivals = {EXCLUSIVE[e] for e in sc.emitters if e in EXCLUSIVE}
+            for other in [o for o in self._demo if o != sc.id and rivals & set(SCENARIOS[o].emitters)]:
+                self._demo.pop(other)  # one drone at a time: flight replaces power-on and back
+            for em in sc.emitters:
+                self.sim.set_emitter(em, True, now, manual=False)
+            self._demo[sc.id] = until = now + sc.duration_s
+        if sc.drone:
+            self._demo_drone_watch = True
+            self.start_drone_watch()
+        elif sc.preset and not self.drone_watch:
+            self.set_scan(False)
+            self.set_preset(sc.preset)
+        logger.info("demo: %s for %.0f s", sc.id, sc.duration_s)
+        return until
+
+    def _demo_end(self, scenario_id: str, now: float) -> None:  # caller holds _demo_lock
+        sc = SCENARIOS[scenario_id]
+        self._demo.pop(scenario_id, None)
+        still = {e for o in self._demo for e in SCENARIOS[o].emitters}
+        for em in sc.emitters:
+            if em not in still and self.sim is not None:
+                self.sim.set_emitter(em, False, now, manual=False)
+        if self._demo_drone_watch and not any(SCENARIOS[o].drone for o in self._demo):
+            self._demo_drone_watch = False
+            self.stop_drone_watch()
+
+    def demo_tick(self, now: float | None = None) -> None:
+        """End scenarios whose time is up. Their CoT then expires as normal."""
+        now = time.time() if now is None else now
+        with self._demo_lock:
+            for sid in [i for i, until in self._demo.items() if until <= now]:
+                self._demo_end(sid, now)
+                logger.info("demo: %s ended", sid)
+
+    def demo_clear(self, now: float | None = None) -> int:
+        """Stop every scenario this tool started and remove its simulated CoT at once."""
+        now = time.time() if now is None else now
+        with self._demo_lock:
+            ids = list(self._demo)
+            for sid in ids:
+                self._demo_end(sid, now)
+            cots, self._demo_cot = self._demo_cot, {}
+            before, self._demo_keys_before = self._demo_keys_before, None
+        if self.cot is not None and cots:
+            lat, lon = self.settings.sensor_lat, self.settings.sensor_lon
+            for uid, (cot_type, make) in cots.items():
+                self.cot.discard_pending(uid)
+                stale = make(now=now, stale_s=0)  # OTS keeps its stored copy otherwise
+                if stale:
+                    self.cot.send(stale)
+                delete = build_delete_cot(uid, cot_type, lat, lon, now=now, simulated=True)
+                if delete:
+                    self.cot.send(delete)
+            self.cot.resend_sa()
+        if before is not None:
+            # Forget what the scenarios added, so the next trigger is new again (fresh alerts and CoT).
+            self.engine.forget({e["key"] for e in self.engine.get_emitters(now)} - before)
+            self.drone = DroneLinkDetector()
+        logger.info("demo: cleared %d scenario(s), removed %d marker(s)", len(ids), len(cots))
+        return len(ids)
 
     # ------------------------------------------------------------ status
 
@@ -388,4 +507,5 @@ class Runtime:
                 "sensor_position": self.has_position,
             },
             "rules": [r.to_dict() for r in self.rules],
+            "demo": {"mode": self.demo_mode, "active": self.demo_active(), "until": dict(self._demo)},
         }

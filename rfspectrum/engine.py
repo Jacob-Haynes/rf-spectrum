@@ -328,6 +328,16 @@ class Engine:
             self.events.clear()
             self.baseline = set()
 
+    def forget(self, keys) -> int:
+        """Drop these emitters (and their tracks) as if never heard. Used by demo clear."""
+        n = 0
+        with self._lock:
+            for k in keys:
+                n += self.emitters.pop(k, None) is not None
+                self._tracks.pop(k, None)
+                self.baseline.discard(k)
+        return n
+
     def get_events(self, limit: int = 200) -> list[dict]:
         with self._lock:
             return list(self.events)[-limit:][::-1]

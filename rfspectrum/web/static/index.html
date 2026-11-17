@@ -39,6 +39,11 @@
   .rf-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   #debrief { white-space: pre-wrap; margin-top: 12px; max-height: 280px; overflow: auto; display: none; }
   .rf-sim { margin-top: var(--gap); }
+  .rf-sim.first { margin: 0 0 var(--gap); }
+  body.on-demand #waterfall { height: 190px; }
+  .rf-sim .rf-head #demoClear { margin-left: auto; }
+  #demobtns .isr-btn { padding: 9px 13px; }
+  .rf-sim .left { color: var(--muted); font-family: var(--mono); font-size: 13px; }
   .rf-sim .rf-actions { margin-top: 6px; }
   .rf-sim .isr-btn.on { border-color: var(--text); background: var(--panel-2); }
   .rf-sim .group { margin-top: 10px; }
@@ -99,13 +104,18 @@
     </div>
   </div>
 
-  <div class="isr-card rf-sim" id="simpanel" style="display:none">
-    <div class="rf-head"><h2>Demo emitters</h2><span class="isr-tag sim">SIM</span></div>
-    <div class="rf-actions">
-      <button class="isr-btn" id="scAuto">Run auto demo</button>
-      <button class="isr-btn" id="scManual">Manual</button>
-    </div>
-    <div id="sim"></div>
+  <div class="isr-card rf-sim" id="demo">
+    <div class="rf-head"><h2>Demo</h2><span class="isr-tag sim">SIM</span><span class="isr-muted" id="demomode"></span>
+      <button class="isr-btn" id="demoClear">Clear demo</button></div>
+    <div class="rf-actions" id="demobtns"></div>
+    <details class="isr-more" id="simmore" style="display:none">
+      <summary>Individual emitters</summary>
+      <div class="rf-actions" id="autobtns">
+        <button class="isr-btn" id="scAuto">Run auto demo</button>
+        <button class="isr-btn" id="scManual">Manual</button>
+      </div>
+      <div id="sim"></div>
+    </details>
   </div>
 
   <details class="isr-more">
@@ -317,8 +327,10 @@ function renderStatus() {
     + (e.baseline ? ` · ${e.baseline} baselined` : "");
   $("win").textContent = e.window_s;
 
+  renderDemo();
   if (status.sim) {
-    $("simpanel").style.display = "";
+    $("simmore").style.display = "";
+    $("autobtns").style.display = status.demo && status.demo.mode === "on_demand" ? "none" : "";
     $("scAuto").className = "isr-btn" + (status.sim.scenario === "auto" ? " on" : "");
     $("scManual").className = "isr-btn" + (status.sim.scenario === "manual" ? " on" : "");
     if (changed("sim", status.sim)) {
@@ -332,6 +344,36 @@ function renderStatus() {
     }
   }
 }
+
+// ---- Demo card (demo trigger contract v6)
+let demo = null;  // from /api/demo/scenarios: {mode, scenarios, available}
+function placeDemo(mode) {
+  const card = $("demo"), onDemand = mode === "on_demand";
+  document.body.classList.toggle("on-demand", onDemand);
+  card.classList.toggle("first", onDemand);
+  // Step by step: on the first screen, under the bands. Continuous: below the live view.
+  if (onDemand) $("bands").after(card); else document.querySelector(".rf-main").after(card);
+}
+function renderDemo() {
+  if (!demo) return;
+  const active = (status && status.demo) ? status.demo : {active: [], until: {}};
+  const now = Date.now() / 1000;
+  const left = demo.scenarios.map(sc => active.until[sc.id] ? Math.max(0, Math.ceil(active.until[sc.id] - now)) : 0);
+  if (!changed("demo", [active.active, left])) return;
+  $("demomode").textContent = demo.mode === "on_demand" ? "Step by step" : "Running continuously";
+  if (!demo.available) {
+    $("demobtns").innerHTML = `<span class="isr-muted">A real SDR is attached, so demo scenarios are off.</span>`;
+    return;
+  }
+  $("demobtns").innerHTML = demo.scenarios.map((sc, i) =>
+    `<button class="isr-btn${left[i] ? " on" : ""}" data-id="${esc(sc.id)}" title="${esc(sc.hint)}">${esc(sc.label)}`
+    + (left[i] ? ` <span class="left">${left[i]} s</span>` : "") + `</button>`).join("");
+  $("demobtns").querySelectorAll("button[data-id]").forEach(b =>
+    b.onclick = () => post("/api/demo/trigger", {id: b.dataset.id}));
+}
+$("demoClear").onclick = () => post("/api/demo/clear");
+fetch("/api/demo/scenarios").then(r => r.json()).then(d => { demo = d; placeDemo(d.mode); renderDemo(); });
+setInterval(renderDemo, 1000);
 
 const SIM = (e) => e.simulated ? ' <span class="isr-tag sim">SIM</span>' : "";
 

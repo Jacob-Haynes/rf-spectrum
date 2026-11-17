@@ -18,6 +18,12 @@ def _flag(name: str, default: bool = False) -> bool:
     return v in ("1", "true", "yes", "on")
 
 
+def _demo_mode(v: str) -> str:
+    """continuous (default, as before) or on_demand (nothing simulated runs until triggered)."""
+    v = v.strip().lower().replace("-", "_")
+    return "on_demand" if v in ("on_demand", "ondemand", "step", "step_by_step") else "continuous"
+
+
 def _sensor_position(lat: str, lon: str) -> dict:
     """Both set, parseable, in range and not 0,0 -> a position; anything else -> unset."""
     try:
@@ -59,6 +65,7 @@ class Settings:
     rules_file: str = ""
     scan_dwell_s: float = 10.0
     drone_watch_dwell_s: float = 8.0  # 2.4 <-> 5.8 GHz dwell while a simulated drone is on
+    demo_mode: str = "continuous"  # DEMO_MODE=continuous|on_demand (contract v6)
     demo: str = ""  # RFSPEC_DEMO=drone: the drone-threat demo profile (CoT alerts default on)
     sim_scenario: str = "auto"
     sim_background: bool = True
@@ -108,6 +115,7 @@ class Settings:
             rules_file=_env("RULES_FILE"),
             scan_dwell_s=float(_env("SCAN_DWELL_S", "10")),
             drone_watch_dwell_s=float(_env("DRONE_WATCH_DWELL_S", "8")),
+            demo_mode=_demo_mode(_env("DEMO_MODE", "continuous")),
             demo=_env("RFSPEC_DEMO").lower(),
             sim_scenario=_env("SIM_SCENARIO", "auto"),
             sim_background=_flag("SIM_BACKGROUND", True),

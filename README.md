@@ -169,6 +169,27 @@ In simulate mode, **Run auto demo** plays the same story unattended (quiet → M
 The demo drone is DJI O3/O4 **digital**, so Auto demo shows the 10/20 MHz digital block, never
 an analog carrier. The analog VTX is a separate, optional **Manual** toggle.
 
+### Step-by-step demo (`DEMO_MODE=on_demand`)
+
+The **Demo** card has one button per scenario: FPV drone in flight, FPV drone powered up,
+Meshtastic node, ELRS 868 control link, smartphone, analogue FPV video and PMR446 handheld. Each
+switches its simulated radios on for a fixed time (45 to 90 s) and tunes to its band; the drone
+scenarios start the 2.4 / 5.8 GHz drone watch. **Clear demo** stops them at once, removes the
+simulated TAK markers they caused (a stale copy plus a `t-x-d-d` force-delete) and forgets their
+emitters, so the next trigger alerts afresh.
+
+`DEMO_MODE=continuous` (the default) behaves as before: Auto demo and the background emitters
+run on their own, and a triggered scenario takes over from Auto demo. `DEMO_MODE=on_demand`
+starts with nothing simulated running (no Auto demo, no background emitters) and puts the Demo
+card on the first screen. Scenarios exist only in simulate mode: with a real SDR attached the
+receiver runs as normal and the card says the scenarios are off.
+
+The launcher can drive the same scenarios over HTTP:
+
+- `GET /api/demo/scenarios` → `{"mode", "scenarios": [{"id", "label", "hint", "duration_s"}], "active": [ids]}`
+- `POST /api/demo/trigger {"id": "fpv-flight"}` → `{"ok": true, "id", "until": <epoch>}`
+- `POST /api/demo/clear` → `{"ok": true, "cleared": n}`
+
 ## Drone link signature (counter-UAS segment)
 
 The reference drone is a 5" FPV with **ExpressLRS 2.4 GHz** control and **DJI O3/O4** video at
@@ -277,7 +298,8 @@ registers on it before sending anything:
 Every `HEARTBEAT_S` seconds (default 10), rf-spectrum publishes a **retained** JSON message to
 `isrkit/heartbeat/rf-spectrum` on the MQTT broker:
 `{"tool":"rf-spectrum","host":"isr-pi","url":"http://isr-pi.local:8140","mode":"simulate|cpu","status":"ok|degraded|error","ts":…}`.
-`status` is `degraded` when the selected band has no receiver or the SDR errored. `host` is `ISR_HOST` if set, else the lowercased short hostname. On a clean
+`status` is `degraded` when the selected band has no receiver or the SDR errored. A `detail`
+object carries `demo_mode` (`continuous` or `on_demand`) and `demo_active` (the running scenario ids). `host` is `ISR_HOST` if set, else the lowercased short hostname. On a clean
 shutdown it publishes `"status":"stopped"`. The heartbeat and mesh alerts share one MQTT
 connection that publishes only while connected; if the broker is down it logs one line, retries
 with backoff (1 s to 60 s) and logs again when it reconnects. The MQTT and TAK addresses come from `MQTT_HOST/PORT/USER/PASS` and
@@ -312,6 +334,7 @@ main settings:
 | `EMCON_WINDOW_S` | `60` | duty-cycle and score window |
 | `SCAN_DWELL_S` | `10` | seconds per band in auto-scan |
 | `SIM_SCENARIO` / `SIM_BACKGROUND` | `auto` / `1` | simulator story and civilian emitters |
+| `DEMO_MODE` | `continuous` | `on_demand`: nothing simulated runs until the presenter triggers a scenario |
 
 ## Legal note (UK)
 
@@ -337,6 +360,7 @@ rfspectrum/
   rules.py       signal-of-interest rules
   engine.py      noise floor, hits, events, emitters, EMCON score
   simulator.py   synthetic RF environment for --simulate
+  demo.py        presenter-triggered demo scenarios (/api/demo/*)
   sources/       rtlsdr (pyrtlsdr), rtl_power, hackrf_sweep, simulated, auto-detect
   alerts/        tak_client.py (registered TAK connection), cot.py (markers), mesh.py (meshbus/tx), mqttbus.py, heartbeat.py
   debrief.py     offline + optional Gemini debrief
