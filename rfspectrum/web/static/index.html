@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RF spectrum</title>
+<link rel="stylesheet" href="isr-ui.css?v=3">
+<script src="isr-ui.js?v=3"></script>
+<style>
+  /* Layout specific to rf-spectrum only (inline, so it versions with the page); colours, type and
+     controls come from isr-ui.css. */
+  .rf-bands { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: var(--gap); }
+  .rf-bands .isr-btn { min-height: 44px; padding: 8px 12px; }
+  .rf-bands .isr-btn.on { border-color: var(--text); background: var(--panel-2); }
+  .rf-bands .isr-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .rf-bands .primary { margin-left: auto; }
+  .rf-main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: var(--gap); align-items: start; }
+  @media (max-width: 1000px) { .rf-main { grid-template-columns: 1fr; } .rf-bands .primary { margin-left: 0; } }
+  .rf-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .rf-head h2 { margin: 0; }
+  .rf-head .isr-muted { margin-left: auto; }
+  #specwrap { position: relative; }
+  canvas { display: block; width: 100%; image-rendering: pixelated; background: var(--bg); }
+  #spectrum { height: 180px; }
+  #alloc { height: 30px; }
+  #waterfall { height: 270px; background: #000; }
+  #axis { height: 20px; }
+  #readout { position: absolute; top: 6px; right: 8px; background: var(--panel); border: 1px solid var(--line);
+    padding: 2px 8px; pointer-events: none; }
+  #readout:empty { display: none; }
+  .rf-side > .isr-card + .isr-card { margin-top: var(--gap); }
+  #tx li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; }
+  #tx .what { font: 500 18px/1.25 var(--label); letter-spacing: .02em; }
+  #tx .strength { text-align: right; font-size: 15px; }
+  #tx li.off { opacity: .45; }
+  #tx li.base { opacity: .35; text-decoration: line-through; }
+  .score-row { display: flex; align-items: baseline; gap: 12px; }
+  .g-SILENT { color: var(--ok); } .g-LOW { color: var(--ok); } .g-ELEVATED { color: var(--warn); } .g-LOUD { color: var(--bad); }
+  .rf-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  #debrief { white-space: pre-wrap; margin-top: 12px; max-height: 280px; overflow: auto; display: none; }
+  .rf-sim { margin-top: var(--gap); }
+  .rf-sim.first { margin: 0 0 var(--gap); }
+  body.on-demand #waterfall { height: 190px; }
+  .rf-sim .rf-head #demoClear { margin-left: auto; }
+  #demobtns .isr-btn { padding: 9px 13px; }
+  .rf-sim .left { color: var(--muted); font-family: var(--mono); font-size: 13px; }
+  .rf-sim .rf-actions { margin-top: 6px; }
+  .rf-sim .isr-btn.on { border-color: var(--text); background: var(--panel-2); }
+  .rf-sim .group { margin-top: 10px; }
+  #drone { display: none; }
+  #drone b { display: block; font: 500 20px/1.2 var(--label); }
+  #drone .isr-muted { color: inherit; opacity: .85; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { text-align: left; font-weight: 400; color: var(--muted); border-bottom: 1px solid var(--line); padding: 4px; }
+  td { padding: 4px; border-bottom: 1px solid var(--line); color: var(--text); vertical-align: top; }
+  .rf-scroll { max-height: 320px; overflow: auto; margin-top: 8px; }
+  .rf-details p { margin: 8px 0; }
+</style>
+</head>
+<body>
+<header class="isr-bar">
+  <h1>RF spectrum</h1><span class="isr-sub">Control links</span>
+  <div class="isr-right">
+    <button class="isr-pill" id="isr-status">Starting</button>
+    <a class="isr-kit-link" id="isr-kit-link" href="#">Kit</a>
+  </div>
+  <div class="isr-status-list" id="isr-status-list"></div>
+</header>
+
+<main>
+  <div id="drone" class="isr-banner"><b id="droneTitle"></b><span id="droneBody" class="isr-muted"></span></div>
+
+  <div class="rf-bands" id="bands"></div>
+
+  <div class="rf-main">
+    <div class="isr-card">
+      <div class="rf-head"><h2 id="ptitle">Spectrum</h2><span id="modetag" class="isr-tag sim">SIM</span>
+        <span class="isr-muted isr-mono" id="prange"></span></div>
+      <div id="specwrap">
+        <canvas id="spectrum" width="1024" height="180"></canvas>
+        <div id="readout" class="isr-mono"></div>
+      </div>
+      <canvas id="alloc" width="1024" height="30"></canvas>
+      <canvas id="waterfall" width="1024" height="270"></canvas>
+      <canvas id="axis" width="1024" height="20"></canvas>
+      <p class="isr-muted" style="margin:10px 0 0">Receive only: this shows radio energy per frequency. It never transmits or decodes.</p>
+    </div>
+
+    <div class="rf-side">
+      <div class="isr-card">
+        <h2>Transmitting now</h2>
+        <ul class="isr-list" id="tx"></ul>
+      </div>
+      <div class="isr-card">
+        <h2>EMCON score</h2>
+        <div class="score-row"><span class="isr-big" id="score">–</span><span id="grade" class="isr-section"></span></div>
+        <div class="isr-muted" id="scoreline"></div>
+        <div class="rf-actions">
+          <button class="isr-btn" id="btnBase">Set baseline</button>
+          <button class="isr-btn" id="btnDebrief">Debrief</button>
+        </div>
+        <div id="debrief" class="isr-muted"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="isr-card rf-sim" id="demo">
+    <div class="rf-head"><h2>Demo</h2><span class="isr-tag sim">SIM</span><span class="isr-muted" id="demomode"></span>
+      <button class="isr-btn" id="demoClear">Clear demo</button></div>
+    <div class="rf-actions" id="demobtns"></div>
+    <details class="isr-more" id="simmore" style="display:none">
+      <summary>Individual emitters</summary>
+      <div class="rf-actions" id="autobtns">
+        <button class="isr-btn" id="scAuto">Run auto demo</button>
+        <button class="isr-btn" id="scManual">Manual</button>
+      </div>
+      <div id="sim"></div>
+    </details>
+  </div>
+
+  <details class="isr-more">
+    <summary>Event log</summary>
+    <div class="rf-scroll"><table>
+      <thead><tr><th>Time</th><th></th><th>Signal</th><th>MHz</th><th>kHz</th><th>dB</th><th>Length</th></tr></thead>
+      <tbody id="events"></tbody>
+    </table></div>
+  </details>
+
+  <details class="isr-more rf-details">
+    <summary>Details</summary>
+    <p id="presetdesc"></p>
+    <p>Band plan bar: green = short-range devices, blue = ISM, purple = licensed, red = take care. Labels summarise
+      Ofcom IR 2030 / ERC Rec 70-03 for training only.</p>
+    <p>EMCON score: 100 means nothing heard. Each emitter costs 15 points and the busiest one's duty cycle costs up
+      to 50, over the last <span id="win">60</span> s. Baselined emitters are not scored. Anyone with a cheap receiver
+      can see what this screen sees.</p>
+    <p>Detection: power above the noise floor, held for a time, inside a band. Drone links are flagged from a hopping
+      control link plus a video link. Bearing is unknown: confirm by sight, sound or radar.</p>
+    <p>Receiver: <span id="src"></span> · <span id="fps">0</span> frames/s · threshold <span id="thr"></span> dB ·
+      bin <span id="bin"></span> kHz. <span id="note"></span></p>
+    <p>Alerts: <span id="alertsline"></span></p>
+    <p>Never transmit, jam or replay. Follow your own spectrum management and EMCON policies.</p>
+    <div class="rf-actions">
+      <button class="isr-btn" id="btnClearBase">Clear baseline</button>
+      <button class="isr-btn danger" id="btnReset">Reset session</button>
+    </div>
+  </details>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const spec = $("spectrum"), sctx = spec.getContext("2d");
+const wf = $("waterfall"), wctx = wf.getContext("2d");
+const al = $("alloc"), actx = al.getContext("2d");
+const ax = $("axis"), xctx = ax.getContext("2d");
+let status = null, preset = null, floor = null, thr = 10, peak = null, lastP = null, wsOk = false;
+let events = [], lastKey = {};
+
+// ---- colour map (dark -> blue -> cyan -> yellow -> red -> white)
+const STOPS = [[0,[0,0,0]],[.15,[10,20,80]],[.35,[20,90,200]],[.55,[40,200,200]],[.72,[240,230,60]],[.88,[250,80,30]],[1,[255,255,255]]];
+const LUT = new Uint8ClampedArray(256 * 3);
+for (let i = 0; i < 256; i++) {
+  const x = i / 255; let k = 0;
+  while (k < STOPS.length - 2 && x > STOPS[k + 1][0]) k++;
+  const [x0, c0] = STOPS[k], [x1, c1] = STOPS[k + 1], f = (x - x0) / (x1 - x0);
+  for (let j = 0; j < 3; j++) LUT[i * 3 + j] = c0[j] + (c1[j] - c0[j]) * f;
+}
+const CSSV = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const BG = CSSV("--bg"), GRID = CSSV("--line"), INK = CSSV("--muted"), TRACE = CSSV("--ok"), FAULT = CSSV("--bad");
+const FONT = "12px " + CSSV("--mono");
+const GRADE = {SILENT: "Silent", LOW: "Low", ELEVATED: "Elevated", LOUD: "Loud"};
+
+function median(a) { const s = Array.from(a).sort((x, y) => x - y); return s[s.length >> 1]; }
+function fmtTime(ts) { return new Date(ts * 1000).toLocaleTimeString([], {hour12: false}); }
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+function changed(key, val) { const s = JSON.stringify(val); if (lastKey[key] === s) return false; lastKey[key] = s; return true; }
+function shortType(s) { return String(s || "").split(" (")[0]; }
+
+function range() {
+  const nf = floor ? median(floor) : (lastP ? median(lastP) : -100);
+  return [nf - 8, nf + 55];
+}
+
+function drawWaterfallRow(p) {
+  const [lo, hi] = range(), n = p.length;
+  wctx.drawImage(wf, 0, 0, wf.width, wf.height - 1, 0, 1, wf.width, wf.height - 1);
+  const row = wctx.createImageData(wf.width, 1);
+  for (let x = 0; x < wf.width; x++) {
+    const v = p[Math.floor(x * n / wf.width)];
+    const i = Math.max(0, Math.min(255, Math.round((v - lo) / (hi - lo) * 255)));
+    row.data[x * 4] = LUT[i * 3]; row.data[x * 4 + 1] = LUT[i * 3 + 1];
+    row.data[x * 4 + 2] = LUT[i * 3 + 2]; row.data[x * 4 + 3] = 255;
+  }
+  wctx.putImageData(row, 0, 0);
+}
+
+function drawSpectrum(p, hits) {
+  const W = spec.width, H = spec.height, [lo, hi] = range(), n = p.length;
+  const y = (v) => H - (v - lo) / (hi - lo) * H;
+  sctx.fillStyle = BG; sctx.fillRect(0, 0, W, H);
+  sctx.strokeStyle = GRID; sctx.lineWidth = 1; sctx.fillStyle = INK; sctx.font = FONT;
+  for (let d = Math.ceil(lo / 10) * 10; d < hi; d += 10) {
+    sctx.beginPath(); sctx.moveTo(0, y(d)); sctx.lineTo(W, y(d)); sctx.stroke();
+    sctx.fillText(d + " dB", 4, y(d) - 3);
+  }
+  if (!peak || peak.length !== n) peak = Float32Array.from(p);
+  for (let i = 0; i < n; i++) peak[i] = Math.max(p[i], peak[i] - 0.4);
+  const line = (arr, color, dash, offs = 0) => {
+    sctx.strokeStyle = color; sctx.setLineDash(dash); sctx.beginPath();
+    for (let i = 0; i < n; i++) { const X = i * W / n, Y = y(arr[i] + offs); i ? sctx.lineTo(X, Y) : sctx.moveTo(X, Y); }
+    sctx.stroke(); sctx.setLineDash([]);
+  };
+  line(peak, INK, []);
+  if (floor && floor.length === n) { line(floor, INK, [4, 4]); line(floor, FAULT, [2, 4], thr); }
+  sctx.beginPath(); sctx.moveTo(0, H);
+  for (let i = 0; i < n; i++) sctx.lineTo(i * W / n, y(p[i]));
+  sctx.lineTo(W, H); sctx.closePath(); sctx.globalAlpha = .12; sctx.fillStyle = TRACE; sctx.fill(); sctx.globalAlpha = 1;
+  line(p, TRACE, []);
+  if (preset) {
+    sctx.fillStyle = FAULT;
+    for (const h of hits || []) {
+      const X = (h.f - preset.lo_mhz) / (preset.hi_mhz - preset.lo_mhz) * W;
+      sctx.beginPath(); sctx.moveTo(X, 2); sctx.lineTo(X - 5, 12); sctx.lineTo(X + 5, 12); sctx.fill();
+    }
+  }
+}
+
+function drawAlloc() {
+  if (!preset) return;
+  const W = al.width, H = al.height, span = preset.hi_mhz - preset.lo_mhz;
+  actx.fillStyle = BG; actx.fillRect(0, 0, W, H);
+  // Band plan shades: quiet greys, tinted just enough to tell the kinds apart.
+  const colors = { srd: "#2c3a30", ism: "#28333d", licensed: "#352f3d", warn: "#40302b" };
+  const allocs = [...preset.allocations].sort((a, b) => (b.hi_mhz - b.lo_mhz) - (a.hi_mhz - a.lo_mhz));
+  allocs.forEach((a) => {
+    const x0 = (a.lo_mhz - preset.lo_mhz) / span * W, x1 = (a.hi_mhz - preset.lo_mhz) / span * W;
+    const wide = (a.hi_mhz - a.lo_mhz) / span > 0.9, yy = wide ? 22 : 2, hh = wide ? 8 : 18;
+    actx.fillStyle = colors[a.kind] || "#333"; actx.fillRect(x0 + 1, yy, Math.max(2, x1 - x0 - 2), hh);
+    if (wide) return;
+    actx.fillStyle = CSSV("--text"); actx.font = FONT;
+    actx.save(); actx.beginPath(); actx.rect(x0, yy, x1 - x0, hh); actx.clip();
+    actx.fillText(a.label, x0 + 4, yy + 13); actx.restore();
+  });
+  xctx.fillStyle = BG; xctx.fillRect(0, 0, ax.width, ax.height);
+  xctx.fillStyle = INK; xctx.font = FONT;
+  for (let i = 0; i <= 8; i++) {
+    const f = preset.lo_mhz + span * i / 8, X = i * ax.width / 8;
+    xctx.fillRect(X, 0, 1, 4);
+    const t = f.toFixed(span < 2 ? 3 : span < 50 ? 1 : 0);
+    xctx.fillText(t, Math.min(Math.max(0, X - 18), ax.width - 48), 16);
+  }
+}
+
+function renderBands() {
+  if (!changed("bands", [status.presets.map(p => [p.id, p.available]), status.preset, status.scan, status.drone_watch])) return;
+  const bar = $("bands"); bar.innerHTML = "";
+  for (const p of status.presets) {
+    const b = document.createElement("button");
+    b.className = "isr-btn" + (p.id === status.preset ? " on" : "");
+    b.textContent = p.name.replace(/ \(.*\)$/, "");
+    b.disabled = !p.available;
+    b.title = p.available ? p.description : "Needs a HackRF";
+    b.onclick = () => post("/api/preset", {id: p.id});
+    bar.appendChild(b);
+  }
+  const s = document.createElement("button");
+  s.className = "isr-btn primary";
+  s.textContent = status.drone_watch ? "Stop drone watch" : status.scan ? "Stop scan" : "Scan all bands";
+  s.title = status.drone_watch ? "Alternating 2.4 and 5.8 GHz" : `Visit each band for ${status.scan_dwell_s} s`;
+  s.onclick = () => post("/api/scan", {on: !status.scan});
+  bar.appendChild(s);
+}
+
+function renderPill() {
+  const a = status.alerts, live = status.mode === "live";
+  const checks = [
+    {name: "Live view", state: wsOk ? "ok" : "bad", text: wsOk ? "connected" : "reconnecting"},
+    {name: "SDR", state: "ok", text: live ? status.source : "simulated (no SDR)"},
+  ];
+  if (status.gemini.enabled) checks.push({name: "AI", state: "ok", text: status.gemini.model, optional: true});
+  if (a.mesh) checks.push({name: "Mesh", state: "ok", text: "alerts on", optional: true});
+  if (a.cot) {
+    checks.push({name: "TAK", state: a.cot_connected ? "ok" : "bad", text: a.cot_connected ? "registered" : "not connected", optional: true});
+    if (!a.sensor_position) checks.push({name: "Position", state: "warn", text: "not set, no map markers", optional: true});
+  }
+  ISR.setStatus(checks);
+}
+
+function renderTransmitting() {
+  const rows = status.emitters.slice(0, 5);
+  if (!changed("tx", rows.map(x => [x.key, x.active, x.baseline, Math.round(x.peak_snr_db), Math.round(x.duty * 100)]))) return;
+  $("tx").innerHTML = rows.map(x => `
+    <li class="${x.baseline ? "base" : x.active ? "" : "off"}" title="${esc(x.name)}">
+      <span class="what">${esc(shortType(x.likely))}</span>
+      <span class="strength isr-mono">+${Math.round(x.peak_snr_db)} dB</span>
+      <span class="isr-muted isr-mono">${x.freq_mhz.toFixed(1)} MHz${x.monitored ? "" : " · last seen"}</span>
+      <span class="isr-muted isr-mono" style="text-align:right">${Math.round(x.duty * 100)}% on air</span>
+    </li>`).join("") || `<li class="isr-muted">Nothing heard. A quiet band is the goal.</li>`;
+}
+
+function renderStatus() {
+  const live = status.mode === "live";
+  $("modetag").className = "isr-tag " + (live ? "live" : "sim");
+  $("modetag").textContent = live ? "LIVE" : "SIM";
+  thr = status.threshold_db;
+  const p = status.presets.find(x => x.id === status.preset);
+  if (!preset || p.id !== preset.id) {
+    preset = p; floor = null; peak = null;
+    wctx.fillStyle = "#000"; wctx.fillRect(0, 0, wf.width, wf.height);
+    drawAlloc();
+  }
+  $("ptitle").textContent = p.name;
+  $("prange").textContent = `${p.lo_mhz}–${p.hi_mhz} MHz`;
+  $("presetdesc").textContent = p.description;
+  $("src").textContent = live ? status.source : "simulated, no SDR attached";
+  $("fps").textContent = status.fps; $("thr").textContent = status.threshold_db; $("bin").textContent = p.bin_khz;
+  $("note").textContent = status.note || "";
+  const a = status.alerts;
+  $("alertsline").textContent = `mesh ${a.mesh ? "on" : "off"}, TAK ${a.cot ? a.tak + (a.cot_connected ? " (registered)" : " (not connected)") : "off"}. `
+    + "Watched bands (MHz): " + a.watch_bands_mhz.map(b => b.join("–")).join(", ") + ".";
+  renderBands(); renderPill(); renderTransmitting();
+
+  const e = status.emcon;
+  $("score").textContent = e.score; $("score").className = "isr-big g-" + e.grade;
+  $("grade").textContent = GRADE[e.grade] || e.grade; $("grade").className = "isr-section g-" + e.grade;
+  $("scoreline").textContent = `${e.emitters} emitter${e.emitters === 1 ? "" : "s"} · busiest ${Math.round(e.max_duty * 100)}% on air`
+    + (e.baseline ? ` · ${e.baseline} baselined` : "");
+  $("win").textContent = e.window_s;
+
+  renderDemo();
+  if (status.sim) {
+    $("simmore").style.display = "";
+    $("autobtns").style.display = status.demo && status.demo.mode === "on_demand" ? "none" : "";
+    $("scAuto").className = "isr-btn" + (status.sim.scenario === "auto" ? " on" : "");
+    $("scManual").className = "isr-btn" + (status.sim.scenario === "manual" ? " on" : "");
+    if (changed("sim", status.sim)) {
+      const groups = {own: "Our kit", background: "Background (not ours)"};
+      $("sim").innerHTML = Object.entries(groups).map(([g, label]) =>
+        `<div class="group isr-muted">${label}</div><div class="rf-actions">` + status.sim.emitters.filter(x => x.group === g).map(x =>
+          `<button class="isr-btn${x.enabled ? " on" : ""}" data-id="${x.id}" data-on="${!x.enabled}">${x.enabled ? "■" : "□"} ${esc(x.label)}</button>`
+        ).join("") + "</div>").join("");
+      $("sim").querySelectorAll("button").forEach(b =>
+        b.onclick = () => post("/api/sim/emitter", {id: b.dataset.id, on: b.dataset.on === "true"}));
+    }
+  }
+}
+
+// ---- Demo card (demo trigger contract v6)
+let demo = null;  // from /api/demo/scenarios: {mode, scenarios, available}
+function placeDemo(mode) {
+  const card = $("demo"), onDemand = mode === "on_demand";
+  document.body.classList.toggle("on-demand", onDemand);
+  card.classList.toggle("first", onDemand);
+  // Step by step: on the first screen, under the bands. Continuous: below the live view.
+  if (onDemand) $("bands").after(card); else document.querySelector(".rf-main").after(card);
+}
+function renderDemo() {
+  if (!demo) return;
+  const active = (status && status.demo) ? status.demo : {active: [], until: {}};
+  const now = Date.now() / 1000;
+  const left = demo.scenarios.map(sc => active.until[sc.id] ? Math.max(0, Math.ceil(active.until[sc.id] - now)) : 0);
+  if (!changed("demo", [active.active, left])) return;
+  $("demomode").textContent = demo.mode === "on_demand" ? "Step by step" : "Running continuously";
+  if (!demo.available) {
+    $("demobtns").innerHTML = `<span class="isr-muted">A real SDR is attached, so demo scenarios are off.</span>`;
+    return;
+  }
+  $("demobtns").innerHTML = demo.scenarios.map((sc, i) =>
+    `<button class="isr-btn${left[i] ? " on" : ""}" data-id="${esc(sc.id)}" title="${esc(sc.hint)}">${esc(sc.label)}`
+    + (left[i] ? ` <span class="left">${left[i]} s</span>` : "") + `</button>`).join("");
+  $("demobtns").querySelectorAll("button[data-id]").forEach(b =>
+    b.onclick = () => post("/api/demo/trigger", {id: b.dataset.id}));
+}
+$("demoClear").onclick = () => post("/api/demo/clear");
+fetch("/api/demo/scenarios").then(r => r.json()).then(d => { demo = d; placeDemo(d.mode); renderDemo(); });
+setInterval(renderDemo, 1000);
+
+const SIM = (e) => e.simulated ? ' <span class="isr-tag sim">SIM</span>' : "";
+
+function renderEvents() {
+  $("events").innerHTML = events.slice(0, 200).map(e => {
+    if (e.type === "drone" || e.type === "drone_end") {
+      const comps = (e.components || []).map(c => esc(c.short)).join(" + ");
+      return `<tr><td>${fmtTime(e.ts)}</td><td>${e.type === "drone" ? "✈" : "○"}${e.confidence === "high" ? " high" : ""}</td>
+        <td colspan="5">${esc(e.name)}${SIM(e)}<br><span class="isr-muted">${comps}</span></td></tr>`;
+    }
+    return `<tr><td>${fmtTime(e.ts)}</td><td>${e.type === "start" ? "▲" : "▼"}${e.new_emitter ? " new" : ""}</td>
+      <td>${esc(e.name)}${SIM(e)}</td><td>${e.freq_mhz.toFixed(3)}</td><td>${Math.round(e.bw_khz)}</td>
+      <td>${e.snr_db}</td><td>${e.duration_s == null ? "" : e.duration_s + " s"}</td></tr>`;
+  }).join("") || `<tr><td colspan="7" class="isr-muted">No events yet.</td></tr>`;
+}
+
+function renderDrone(d) {
+  const box = $("drone");
+  if (!d || d.level === "none") { box.style.display = "none"; return; }
+  box.style.display = "block"; box.className = "isr-banner" + (d.level === "high" ? " bad" : "");
+  $("droneTitle").innerHTML = "✈ " + esc(d.level === "high" ? "Drone control and video link: higher confidence" : "Possible drone control or video link")
+    + (d.simulated ? ' <span class="isr-tag sim">SIM</span>' : "");
+  const what = d.components.map(c => c.short || c.label).join(" + ");
+  $("droneBody").textContent = what.charAt(0).toUpperCase() + what.slice(1) + ". Bearing unknown: confirm by sight, sound or radar.";
+}
+
+async function post(url, body) {
+  const r = await fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+  return r.json();
+}
+
+$("btnBase").onclick = () => post("/api/baseline", {action: "set"});
+$("btnClearBase").onclick = () => post("/api/baseline", {action: "clear"});
+$("btnReset").onclick = async () => { await post("/api/reset"); events = []; renderEvents(); };
+$("scAuto").onclick = () => post("/api/sim/scenario", {scenario: "auto"});
+$("scManual").onclick = () => post("/api/sim/scenario", {scenario: "manual"});
+$("btnDebrief").onclick = async () => {
+  const box = $("debrief"); box.style.display = "block"; box.textContent = "Writing debrief…";
+  try {
+    const d = await post("/api/debrief");
+    box.textContent = d.text;
+  } catch (err) {
+    box.textContent = "Debrief failed. Check the connection and try again.";
+  }
+};
+
+spec.addEventListener("mousemove", (ev) => {
+  if (!preset || !lastP) return;
+  const r = spec.getBoundingClientRect(), x = (ev.clientX - r.left) / r.width;
+  const i = Math.min(lastP.length - 1, Math.max(0, Math.floor(x * lastP.length)));
+  const f = preset.lo_mhz + x * (preset.hi_mhz - preset.lo_mhz);
+  const snr = floor ? (lastP[i] - floor[i]).toFixed(1) : "?";
+  $("readout").textContent = `${f.toFixed(3)} MHz · +${snr} dB`;
+});
+spec.addEventListener("mouseleave", () => $("readout").textContent = "");
+
+function connect() {
+  const ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws.onopen = () => { wsOk = true; if (status) renderPill(); };
+  ws.onclose = () => { wsOk = false; if (status) renderPill(); setTimeout(connect, 1500); };
+  ws.onmessage = (m) => {
+    const msg = JSON.parse(m.data);
+    if (msg.t === "status") { status = msg; renderStatus(); renderDrone(msg.drone); }
+    else if (msg.t === "frame") {
+      if (!preset || msg.preset !== preset.id) return;
+      if (msg.nf) { floor = msg.nf; thr = msg.thr; }
+      lastP = msg.p; drawSpectrum(msg.p, msg.hits); drawWaterfallRow(msg.p);
+    } else if (msg.t === "event") { events.unshift(msg.event); events = events.slice(0, 300); renderEvents(); }
+  };
+}
+fetch("/api/events").then(r => r.json()).then(e => { events = e; renderEvents(); });
+connect();
+</script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+[Unit]
+Description=rf-spectrum: receive-only spectrum awareness / EMCON demo (port 8140)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=rf-spectrum
+Group=rf-spectrum
+SupplementaryGroups=plugdev
+WorkingDirectory=/opt/rf-spectrum
+EnvironmentFile=-/etc/rf-spectrum.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/rf-spectrum/deploy/start.sh
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/rf-spectrum
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

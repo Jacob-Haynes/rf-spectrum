@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.env
+!deploy/*.env.example
+data/
+.pytest_cache/
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
