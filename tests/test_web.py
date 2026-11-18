@@ -128,8 +128,8 @@ def test_drone_demo_profile_defaults_cot_on(monkeypatch):
 
 # sha256 of the ISR kit v3 files (pi-profiles/ui/): the served copies must be the kit, unchanged.
 KIT_SHA256 = {
-    "isr-ui.css": "287c3df0938d25c25b04b751007095c3cf08e1df0e2689d3dd8df8b3e9eb832c",
-    "isr-ui.js": "79a61cb2a427302e45b62cbebe2d022eff2dcd0549df5edea77b13a6b478fe7d",
+    "isr-ui.css": "59982e401316f8ef3032df561974c542119bbbf606998af97f92fff656ddab1e",
+    "isr-ui.js": "109cef714b1f4dfba0159c0f5cab04e4cd2338eea61e41705063e43f4e9ea296",
     "fonts/OFL-BarlowCondensed.txt": "186d750eb496a4c17a76385f82be6aea2ac1cf2de074a811d63786cf374ea73f",
     "fonts/OFL-IBMPlexMono.txt": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
     "fonts/barlow-condensed-500.woff2": "31ff5e6e96a096fde4d78bc838719e69b093db2d0b062b96e423c065a6d1b2b1",
@@ -142,14 +142,14 @@ KIT_SHA256 = {
 def test_page_uses_isr_ui_kit(client):
     c, _ = client
     html = c.get("/").text
-    assert '<link rel="stylesheet" href="isr-ui.css?v=3">' in html
-    assert '<script src="isr-ui.js?v=3"></script>' in html
+    assert '<link rel="stylesheet" href="isr-ui.css?v=4">' in html
+    assert '<script src="isr-ui.js?v=4"></script>' in html
     assert 'id="isr-status"' in html and 'id="isr-kit-link"' in html and "<h1>RF spectrum</h1>" in html
     for name, sha in KIT_SHA256.items():
         r = c.get("/" + name)
         assert r.status_code == 200
         assert hashlib.sha256(r.content).hexdigest() == sha, f"{name} differs from the ISR kit copy"
-    assert c.get("/isr-ui.css?v=3").headers["content-type"].startswith("text/css")
+    assert c.get("/isr-ui.css?v=4").headers["content-type"].startswith("text/css")
     assert c.get("/fonts/ibm-plex-mono-400.woff2").headers["content-type"] == "font/woff2"
     assert c.get("/fonts/..%2Fapp.py").status_code == 404
     assert c.get("/fonts/missing.woff2").status_code == 404
